@@ -1,10 +1,20 @@
 import type { Metadata } from "next";
+import {
+  ClerkProvider,
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  UserButton,
+} from "@clerk/nextjs";
+import { koKR } from "@clerk/localizations";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ReelsMaker",
   description: "AI 영상 제작 파이프라인",
 };
+
+const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 function NavBar({ children }: { children?: React.ReactNode }) {
   return (
@@ -36,62 +46,42 @@ function NavBar({ children }: { children?: React.ReactNode }) {
   );
 }
 
-function ClerkLayout({ children }: { children: React.ReactNode }) {
-  // Dynamic import: only load Clerk when keys are configured
-  const {
-    ClerkProvider,
-    SignedIn,
-    SignedOut,
-    SignInButton,
-    UserButton,
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-  } = require("@clerk/nextjs");
-  const { koKR } = require("@clerk/localizations");
-
-  return (
-    <ClerkProvider localization={koKR}>
-      <NavBar>
-        <SignedOut>
-          <SignInButton mode="modal">
-            <button className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition">
-              로그인
-            </button>
-          </SignInButton>
-        </SignedOut>
-        <SignedIn>
-          <UserButton
-            appearance={{ elements: { avatarBox: "w-7 h-7" } }}
-          />
-        </SignedIn>
-      </NavBar>
-      <div className="px-6 py-4">{children}</div>
-    </ClerkProvider>
-  );
-}
-
-function PlainLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <NavBar />
-      <div className="px-6 py-4">{children}</div>
-    </>
-  );
-}
-
-const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const content = (
+    <>
+      <NavBar>
+        {hasClerk && (
+          <>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition">
+                  로그인
+                </button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton
+                appearance={{ elements: { avatarBox: "w-7 h-7" } }}
+              />
+            </SignedIn>
+          </>
+        )}
+      </NavBar>
+      <div className="px-6 py-4">{children}</div>
+    </>
+  );
+
   return (
     <html lang="ko">
       <body className="min-h-screen bg-neutral-950 text-neutral-50 antialiased">
         {hasClerk ? (
-          <ClerkLayout>{children}</ClerkLayout>
+          <ClerkProvider localization={koKR}>{content}</ClerkProvider>
         ) : (
-          <PlainLayout>{children}</PlainLayout>
+          content
         )}
       </body>
     </html>

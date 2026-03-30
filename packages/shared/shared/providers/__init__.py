@@ -23,7 +23,11 @@ from shared.providers.tts_base import (
     WordTimestamp,
 )
 from shared.providers.factory import get_image_provider, get_tts_provider, get_video_provider
-from shared.providers.validation import generate_validated, validate_response
+from shared.providers.validation import (
+    generate_validated,
+    generate_validated_with_semantic,
+    validate_response,
+)
 
 __all__ = [
     "ProviderError",
@@ -43,6 +47,7 @@ __all__ = [
     "TTSResponse",
     "WordTimestamp",
     "generate_validated",
+    "generate_validated_with_semantic",
     "validate_response",
     "get_image_provider",
     "get_video_provider",

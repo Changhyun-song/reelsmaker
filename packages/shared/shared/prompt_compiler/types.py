@@ -4,7 +4,11 @@ These Pydantic models serve as the compiler's interface. The API layer
 converts ORM objects into these types before calling compiler functions.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+QualityMode = Literal["speed", "balanced", "quality"]
 
 
 class StyleContext(BaseModel):
@@ -114,6 +118,7 @@ class CompilerContext(BaseModel):
     scene: SceneContext = Field(default_factory=SceneContext)
     shot: ShotContext = Field(default_factory=ShotContext)
     frame: FrameContext = Field(default_factory=FrameContext)
+    quality_mode: QualityMode = "balanced"
 
 
 class CompiledPrompt(BaseModel):

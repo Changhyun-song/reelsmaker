@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "reelsmaker"
     s3_region: str = "us-east-1"
+    s3_public_endpoint: str = ""
 
     # ── AI providers — keys ──────────────────────────
     openai_api_key: str = ""
@@ -27,12 +28,14 @@ class Settings(BaseSettings):
     fal_key: str = ""
     runway_api_key: str = ""
     luma_api_key: str = ""
+    higgsfield_api_key_id: str = ""
+    higgsfield_api_key_secret: str = ""
     elevenlabs_api_key: str = ""
 
     # ── AI providers — selection ──────────────────────
     # "mock" uses local placeholder; real provider name enables API calls
-    image_provider: str = "mock"       # "mock" | "fal" | "openai" | "gemini"
-    video_provider: str = "mock"       # "mock" | "runway" | "kling" | "luma"
+    image_provider: str = "mock"       # "mock" | "fal" | "openai" | "gemini" | "higgsfield"
+    video_provider: str = "mock"       # "mock" | "runway" | "kling" | "luma" | "higgsfield"
     tts_provider: str = "mock"         # "mock" | "elevenlabs"
 
     # ── AI providers — behavior ──────────────────────
@@ -43,6 +46,8 @@ class Settings(BaseSettings):
     runway_model: str = "gen4_turbo"
     kling_model: str = "fal-ai/kling-video/v2/master/image-to-video"
     luma_model: str = "ray-2"
+    higgsfield_model: str = "higgsfield-ai/dop/standard"
+    higgsfield_image_model: str = "higgsfield-ai/soul/standard"
     elevenlabs_model: str = "eleven_multilingual_v2"
     elevenlabs_default_voice: str = ""
 
@@ -51,6 +56,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     sql_echo: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
+    auto_seed: bool = False
 
 
 @lru_cache

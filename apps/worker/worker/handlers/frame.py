@@ -20,10 +20,11 @@ from shared.models.frame_spec import FrameSpec
 from shared.models.project import Project
 from shared.models.scene import Scene
 from shared.models.shot import Shot
-from shared.providers import ProviderRequest, generate_validated
+from shared.providers import ProviderRequest, generate_validated, generate_validated_with_semantic
 from shared.providers.claude_text import ClaudeTextProvider
 from shared.providers.logger import log_provider_run
 from shared.prompt_compiler.context_builder import build_continuity_text_block
+from shared.qa.planning_guards import validate_frame_spec_semantic
 from shared.schemas.contracts import FrameSpecOutput, SingleFrameSpecOutput
 
 logger = logging.getLogger("reelsmaker.handlers.frame")
@@ -73,11 +74,39 @@ The difference between start and end frames MUST reflect the shot's camera_motio
 - If transition is "cut": lighting direction, color temperature, subject outfit must match.
 - If transition is "dissolve": allow slight lighting/mood shift, keep subject consistent.
 
-## BANNED
-- Vague composition like "balanced" or "aesthetic" without specifics.
-- action_pose that's just an emotion: "happy" → describe the PHYSICAL pose.
-- lighting without direction/temperature: "good lighting" → describe key/fill/rim.
-- background_description under 10 chars.
+## BANNED PHRASES (will be auto-rejected if detected)
+- Vague composition: "balanced", "aesthetic", "centered", "nice framing"
+- Emotion-only action_pose: "happy", "focused", "excited", "thinking", "working"
+  → MUST include physical body parts: "leaning forward with both hands on keyboard,
+  slight smile, shoulders relaxed, head tilted 5° right"
+- Vague lighting: "good lighting", "nice lighting", "well-lit", "beautiful lighting",
+  "natural lighting", "studio lighting"
+  → MUST use: direction (camera-left 45°) + color temperature (3200K) + role (key/fill/rim)
+- Vague background: "nice background", "simple background", "clean background"
+
+## LIGHTING STRICTNESS (CRITICAL)
+- MUST describe ≥2 of: key light, fill light, rim/accent light
+- MUST include direction (from where), color temperature (warm/cool or Kelvin), and
+  role (key/fill/rim/accent) for each light
+- Minimum 25 characters (schema enforced)
+- Bad: "Warm lighting from left" → Good: "Key: warm 3200K tungsten from camera-left
+  45° above at full intensity. Fill: soft cool 5600K bounced from right at 40% power.
+  Rim: thin warm edge highlight from behind-right separating subject from background."
+
+## ACTION_POSE STRICTNESS
+- MUST include at least one body part reference (hands, arms, head, shoulders, etc.)
+- MUST describe physical posture, not just emotional state
+- Minimum 15 characters (schema enforced)
+- Bad: "Looking happy" → Good: "Standing upright, right hand gesturing palm-up at
+  shoulder height, left hand holding phone at waist level, chin slightly raised,
+  wide genuine smile showing teeth"
+
+## BACKGROUND_DESCRIPTION STRICTNESS
+- MUST describe at least 2 depth layers (foreground + background, or near + mid + far)
+- Minimum 20 characters (schema enforced)
+- Bad: "Office background" → Good: "Foreground: blurred coffee mug and sticky notes.
+  Mid-ground: white standing desk with dual monitors. Background: floor-to-ceiling
+  window showing evening cityscape with warm interior reflections."
 - Identical composition for start and end frames when camera_motion is not "static".
 - Using the same subject_position for start and end when motion is pan/dolly/tracking.
 
@@ -308,8 +337,10 @@ async def handle_frame_plan(job_id: str, **params) -> dict:
     await _update_job_progress(job_id, 10)
 
     try:
-        response, result = await generate_validated(
-            provider, request, FrameSpecOutput, max_attempts=3
+        response, result = await generate_validated_with_semantic(
+            provider, request, FrameSpecOutput,
+            semantic_guard=validate_frame_spec_semantic,
+            max_attempts=3, max_semantic_retries=2,
         )
     except Exception as exc:
         await log_provider_run(

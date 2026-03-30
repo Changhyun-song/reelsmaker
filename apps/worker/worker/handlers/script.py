@@ -18,9 +18,10 @@ from shared.models.frame_spec import FrameSpec
 from shared.models.scene import Scene
 from shared.models.script_version import ScriptVersion
 from shared.models.shot import Shot
-from shared.providers import ProviderRequest, generate_validated
+from shared.providers import ProviderRequest, generate_validated, generate_validated_with_semantic
 from shared.providers.claude_text import ClaudeTextProvider
 from shared.providers.logger import log_provider_run
+from shared.qa.planning_guards import validate_script_plan_semantic
 from shared.schemas.contracts import ScriptPlanOutput, ScriptStructureOutput
 
 logger = logging.getLogger("reelsmaker.handlers.script")
@@ -63,11 +64,25 @@ Given user inputs, create a structured script plan.
 - Section durations must sum to ±15% of requested total duration
 - Hook ≤ 3 seconds of narration
 
-## BANNED PATTERNS
-- Generic openers: "오늘은", "안녕하세요", "Hi everyone", "In this video"
+## BANNED PATTERNS (will be rejected if used)
+- Generic openers: "오늘은", "안녕하세요", "Hi everyone", "In this video",
+  "welcome to", "hey guys", "여러분"
 - Filler transitions: "자, 그럼", "다음으로", "Now let's move on"
-- Vague visual notes: "relevant image", "show example", "적절한 영상"
+- Vague visual notes: "relevant image", "show example", "적절한 영상",
+  "관련 이미지", "적절한 이미지", "nice visuals", "good visuals"
+- Vague descriptors anywhere: "beautiful shot", "nice background", "amazing visual",
+  "stunning", "gorgeous", "aesthetic"
 - Placeholder text in any field
+
+## VISUAL_NOTES STRICTNESS
+- MUST be ≥20 characters
+- MUST follow format: "[Shot type] Subject doing action in environment.
+  Lighting: X. Camera: Y."
+- MUST include ALL of: shot type in brackets, specific subject, specific lighting
+  direction/quality, camera movement or angle
+- Bad: "Show the app interface" → Good: "[Close-up] Smartphone screen displaying
+  Notion app in dark mode, user's hands scrolling. Lighting: soft blue screen glow
+  illuminating face from below. Camera: slow dolly in over 3 seconds."
 
 ## Output ONLY valid JSON — no markdown fences, no commentary."""
 
@@ -189,8 +204,10 @@ async def handle_script_generate(job_id: str, **params) -> dict:
     await _update_job_progress(job_id, 10)
 
     try:
-        response, result = await generate_validated(
-            provider, request, ScriptPlanOutput, max_attempts=3
+        response, result = await generate_validated_with_semantic(
+            provider, request, ScriptPlanOutput,
+            semantic_guard=validate_script_plan_semantic,
+            max_attempts=3, max_semantic_retries=2,
         )
     except Exception as exc:
         await log_provider_run(

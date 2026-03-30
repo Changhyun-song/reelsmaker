@@ -19,10 +19,11 @@ from shared.models.continuity_profile import ContinuityProfile
 from shared.models.project import Project
 from shared.models.scene import Scene
 from shared.models.shot import Shot
-from shared.providers import ProviderRequest, generate_validated
+from shared.providers import ProviderRequest, generate_validated, generate_validated_with_semantic
 from shared.providers.claude_text import ClaudeTextProvider
 from shared.providers.logger import log_provider_run
 from shared.prompt_compiler.context_builder import build_continuity_text_block
+from shared.qa.planning_guards import validate_shot_breakdown_semantic
 from shared.schemas.contracts import ShotBreakdownOutput, SingleShotOutput
 
 logger = logging.getLogger("reelsmaker.handlers.shot")
@@ -75,11 +76,27 @@ Also output **total_duration_sec** (sum of all shot durations).
 - Medium scenes (10-20s): 3-5 shots.
 - Long scenes (20-40s): 4-8 shots.
 
-## BANNED
-- description shorter than 30 characters.
-- subject like "the subject" / "a person" / "someone" — must be SPECIFIC.
-- environment like "a place" / "background" / "some location".
-- Consecutive identical camera_framing values (must vary).
+## BANNED PHRASES (will be auto-rejected if detected)
+- Generic subject: "a person", "someone", "the subject", "the character",
+  "a man", "a woman", "the host", "the presenter", "a figure"
+  → MUST be specific: "woman in navy blazer holding tablet", "young developer
+  with round glasses typing on mechanical keyboard"
+- Generic environment: "a place", "background", "some location", "a room",
+  "an office", "somewhere", "nice place"
+- Vague descriptors in description: "beautiful shot", "nice background",
+  "good lighting", "stunning", "aesthetic"
+- description shorter than 50 characters (will fail schema validation)
+
+## DESCRIPTION STRICTNESS (CRITICAL — this becomes the image generation prompt)
+- MUST be ≥60 characters in practice (schema minimum is 50)
+- MUST include ALL five elements: subject + action/pose + environment +
+  lighting direction/quality + mood/atmosphere
+- Bad: "Person at desk working on computer" (too vague, 37 chars)
+- Good: "Close-up of woman in navy blazer typing on mechanical keyboard,
+  warm desk lamp illuminating from camera-left, shallow depth of field,
+  modern minimalist home office with bookshelf background, focused
+  productivity mood, cinematic 8K quality" (specific, 230 chars)
+- Consecutive identical camera_framing values (must vary for 3+ shots).
 - narration_segment that doesn't come from the scene's actual narration text.
 
 Output ONLY valid JSON — no markdown fences, no commentary."""
@@ -239,8 +256,10 @@ async def handle_shot_plan(job_id: str, **params) -> dict:
     await _update_job_progress(job_id, 10)
 
     try:
-        response, result = await generate_validated(
-            provider, request, ShotBreakdownOutput, max_attempts=3
+        response, result = await generate_validated_with_semantic(
+            provider, request, ShotBreakdownOutput,
+            semantic_guard=validate_shot_breakdown_semantic,
+            max_attempts=3, max_semantic_retries=2,
         )
     except Exception as exc:
         await log_provider_run(

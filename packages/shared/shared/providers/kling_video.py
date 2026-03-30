@@ -19,6 +19,20 @@ from shared.providers.video_base import (
 
 logger = logging.getLogger("reelsmaker.providers.kling_video")
 
+_DEFAULT_VIDEO_NEGATIVE = (
+    "temporal flicker, frame jitter, morphing face, warped hands, rubber limbs, "
+    "sudden camera shake, inconsistent lighting between frames, subtitle text, "
+    "watermark, compression artifacts, duplicated subject, ghosting, "
+    "unnatural motion blur, face distortion, floating limbs"
+)
+
+# cfg_scale defaults per quality mode — lower = more creative, higher = more faithful
+_CFG_DEFAULTS: dict[str, float] = {
+    "speed": 0.5,
+    "balanced": 0.5,
+    "quality": 0.7,
+}
+
 
 class KlingVideoProvider(VideoProvider):
     """Generate video clips using Kling 2.0 Master via fal.ai.
@@ -100,6 +114,7 @@ class KlingVideoProvider(VideoProvider):
                 "mode": request.mode,
                 "prompt_preview": request.prompt[:100],
                 "video_url": video_url,
+                "quality_mode": request.provider_options.get("quality_mode", "balanced"),
             },
         )
 
@@ -117,6 +132,29 @@ class KlingVideoProvider(VideoProvider):
             metadata={"fal_request_id": result.get("request_id", "")},
         )
 
+    def _resolve_negative(self, request: VideoGenerationRequest) -> str:
+        """Merge request negative with baseline, deduplicating tokens."""
+        baseline_tokens = [t.strip() for t in _DEFAULT_VIDEO_NEGATIVE.split(",")]
+        user_tokens = []
+        if request.negative_prompt:
+            user_tokens = [t.strip() for t in request.negative_prompt.split(",") if t.strip()]
+
+        seen: set[str] = set()
+        merged: list[str] = []
+        for t in user_tokens + baseline_tokens:
+            key = t.lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(t)
+        return ", ".join(merged)
+
+    def _resolve_cfg(self, request: VideoGenerationRequest) -> float:
+        """Determine cfg_scale from explicit option > quality mode > default."""
+        if "cfg_scale" in request.provider_options:
+            return float(request.provider_options["cfg_scale"])
+        mode = request.provider_options.get("quality_mode", "balanced")
+        return _CFG_DEFAULTS.get(mode, 0.5)
+
     def _build_i2v_args(self, request: VideoGenerationRequest) -> dict[str, Any]:
         mime = request.start_frame_mime or "image/png"
         b64 = base64.b64encode(request.start_frame_bytes).decode()
@@ -128,10 +166,14 @@ class KlingVideoProvider(VideoProvider):
             "prompt": request.prompt,
             "image_url": data_uri,
             "duration": duration,
-            "negative_prompt": request.negative_prompt or "blur, distort, and low quality",
-            "cfg_scale": request.provider_options.get("cfg_scale", 0.5),
+            "negative_prompt": self._resolve_negative(request),
+            "cfg_scale": self._resolve_cfg(request),
         }
-        args.update(request.provider_options)
+
+        _internal_keys = {"quality_mode", "cfg_scale", "negative_video", "aspect_ratio"}
+        for k, v in request.provider_options.items():
+            if k not in _internal_keys and k not in args:
+                args[k] = v
         return args
 
     def _build_t2v_args(self, request: VideoGenerationRequest) -> dict[str, Any]:
@@ -142,10 +184,14 @@ class KlingVideoProvider(VideoProvider):
             "prompt": request.prompt,
             "duration": duration,
             "aspect_ratio": ratio,
-            "negative_prompt": request.negative_prompt or "blur, distort, and low quality",
-            "cfg_scale": request.provider_options.get("cfg_scale", 0.5),
+            "negative_prompt": self._resolve_negative(request),
+            "cfg_scale": self._resolve_cfg(request),
         }
-        args.update(request.provider_options)
+
+        _internal_keys = {"quality_mode", "cfg_scale", "negative_video", "aspect_ratio"}
+        for k, v in request.provider_options.items():
+            if k not in _internal_keys and k not in args:
+                args[k] = v
         return args
 
     async def health_check(self) -> bool:

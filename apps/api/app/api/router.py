@@ -52,6 +52,100 @@ api_router.include_router(evaluations_router, prefix="/projects", tags=["evaluat
 api_router.include_router(continuity_router, prefix="/projects", tags=["continuity"])
 
 
+@api_router.get("/projects/{project_id}/progress", tags=["projects"])
+async def project_progress(project_id: str, db: AsyncSession = Depends(get_db)):
+    """Return pipeline completion status for each stage."""
+    from shared.models import (
+        ScriptVersion, Scene, Shot, FrameSpec, Asset,
+        VoiceTrack, SubtitleTrack, Timeline, RenderJob, Job,
+    )
+    from sqlalchemy import func, select
+
+    sv = await db.execute(
+        select(ScriptVersion.id, ScriptVersion.status)
+        .where(ScriptVersion.project_id == project_id)
+        .order_by(ScriptVersion.version.desc())
+        .limit(1)
+    )
+    script_row = sv.first()
+    script_id = script_row[0] if script_row else None
+    has_script = script_row is not None and script_row[1] in ("planned", "structured")
+
+    scene_count = 0
+    shot_count = 0
+    frame_count = 0
+    if script_id:
+        scene_count = (await db.execute(
+            select(func.count()).where(Scene.script_version_id == script_id)
+        )).scalar() or 0
+        if scene_count > 0:
+            scene_ids = [r[0] for r in (await db.execute(
+                select(Scene.id).where(Scene.script_version_id == script_id)
+            )).all()]
+            shot_count = (await db.execute(
+                select(func.count()).where(Shot.scene_id.in_(scene_ids))
+            )).scalar() or 0
+            if shot_count > 0:
+                shot_ids = [r[0] for r in (await db.execute(
+                    select(Shot.id).where(Shot.scene_id.in_(scene_ids))
+                )).all()]
+                frame_count = (await db.execute(
+                    select(func.count()).where(FrameSpec.shot_id.in_(shot_ids))
+                )).scalar() or 0
+
+    image_count = (await db.execute(
+        select(func.count()).where(Asset.project_id == project_id, Asset.asset_type == "image")
+    )).scalar() or 0
+
+    video_count = (await db.execute(
+        select(func.count()).where(Asset.project_id == project_id, Asset.asset_type == "video")
+    )).scalar() or 0
+
+    voice_count = (await db.execute(
+        select(func.count()).where(VoiceTrack.project_id == project_id)
+    )).scalar() or 0
+
+    subtitle_count = (await db.execute(
+        select(func.count()).where(SubtitleTrack.project_id == project_id)
+    )).scalar() or 0
+
+    timeline_count = (await db.execute(
+        select(func.count()).where(Timeline.project_id == project_id)
+    )).scalar() or 0
+
+    render_completed = (await db.execute(
+        select(func.count()).where(
+            RenderJob.project_id == project_id, RenderJob.status == "completed"
+        )
+    )).scalar() or 0
+
+    running_jobs = (await db.execute(
+        select(Job.id, Job.job_type, Job.status, Job.progress)
+        .where(Job.project_id == project_id, Job.status.in_(["queued", "running"]))
+        .order_by(Job.created_at.desc())
+        .limit(5)
+    )).all()
+
+    active_jobs = [
+        {"id": str(j[0]), "job_type": j[1], "status": j[2], "progress": j[3]}
+        for j in running_jobs
+    ]
+
+    return {
+        "script": has_script,
+        "scenes": scene_count,
+        "shots": shot_count,
+        "frames": frame_count,
+        "images": image_count,
+        "videos": video_count,
+        "voices": voice_count,
+        "subtitles": subtitle_count,
+        "timelines": timeline_count,
+        "renders": render_completed,
+        "active_jobs": active_jobs,
+    }
+
+
 @api_router.get("/health", tags=["system"])
 async def health_check(db: AsyncSession = Depends(get_db)):
     checks: dict[str, str] = {"api": "ok"}

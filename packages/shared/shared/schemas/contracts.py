@@ -10,9 +10,10 @@ Validation philosophy:
   - Cross-field validators where consistency matters
 """
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Shared enums ──────────────────────────────────────
 
@@ -58,10 +59,23 @@ class ScriptSection(BaseModel):
     description: str = Field(..., min_length=5, description="What this section achieves")
     narration: str = Field(..., min_length=5, description="Exact spoken narration text")
     visual_notes: str = Field(
-        ..., min_length=5,
-        description="Concrete visual direction: what appears on screen",
+        ..., min_length=20,
+        description=(
+            "Concrete visual direction in format: "
+            "'[Shot type] Subject doing action in environment. Lighting: X. Camera: Y.'"
+        ),
     )
     duration_sec: float = Field(ge=2, le=300, default=10)
+
+    @field_validator("visual_notes")
+    @classmethod
+    def visual_notes_not_placeholder(cls, v: str) -> str:
+        _banned = ["relevant image", "show example", "적절한 영상", "관련 이미지", "적절한 이미지"]
+        low = v.lower()
+        for b in _banned:
+            if b in low:
+                raise ValueError(f"visual_notes contains banned placeholder '{b}'")
+        return v
 
 
 class ScriptPlanOutput(BaseModel):
@@ -171,8 +185,8 @@ class ShotBreakdownItem(BaseModel):
     transition_out: str = Field(default="cut")
     asset_strategy: str = Field(default="image_to_video")
     description: str = Field(
-        ..., min_length=30,
-        description="Standalone visual prompt: subject + action + environment + lighting + mood",
+        ..., min_length=50,
+        description="Standalone visual prompt: subject + action + environment + lighting + mood (≥50 chars)",
     )
 
 
@@ -208,7 +222,7 @@ class SingleShotOutput(BaseModel):
     transition_in: str = Field(default="cut")
     transition_out: str = Field(default="cut")
     asset_strategy: str = Field(default="image_to_video")
-    description: str = Field(..., min_length=30)
+    description: str = Field(..., min_length=50)
 
 
 # ── 4. Frame Spec Breakdown ──────────────────────────
@@ -235,17 +249,24 @@ class FrameSpecItem(BaseModel):
         description="Focal length + DOF e.g. '85mm portrait, shallow DOF f/1.8'",
     )
     lighting: str = Field(
-        ..., min_length=10,
-        description="Key/fill/rim setup e.g. 'warm key from camera-left 45°, soft fill from right, cool rim behind'",
+        ..., min_length=25,
+        description=(
+            "THREE-POINT lighting: direction + color temp + role for each. "
+            "E.g. 'Key: warm 3200K from camera-left 45°. Fill: soft 5600K from right. "
+            "Rim: thin edge light from behind.'"
+        ),
     )
     mood: str = Field(..., min_length=3)
     action_pose: str = Field(
-        ..., min_length=5,
-        description="Specific pose/gesture/expression, not abstract feelings",
+        ..., min_length=15,
+        description=(
+            "Physical posture description with body parts, not just emotions. "
+            "E.g. 'leaning forward, both hands on keyboard, slight smile'"
+        ),
     )
     background_description: str = Field(
-        ..., min_length=10,
-        description="Detailed background in English for generation AI",
+        ..., min_length=20,
+        description="Layered background: foreground + mid-ground + far background details",
     )
     continuity_notes: str = Field(
         default="",
@@ -279,10 +300,10 @@ class SingleFrameSpecOutput(BaseModel):
     subject_position: str = Field(..., min_length=5)
     camera_angle: str = Field(..., min_length=3)
     lens_feel: str = Field(..., min_length=5)
-    lighting: str = Field(..., min_length=10)
+    lighting: str = Field(..., min_length=25)
     mood: str = Field(..., min_length=3)
-    action_pose: str = Field(..., min_length=5)
-    background_description: str = Field(..., min_length=10)
+    action_pose: str = Field(..., min_length=15)
+    background_description: str = Field(..., min_length=20)
     continuity_notes: str = ""
     forbidden_elements: str = ""
 

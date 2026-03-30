@@ -23,9 +23,25 @@ logger = logging.getLogger("reelsmaker.providers.factory")
 
 
 def get_image_provider() -> ImageProvider:
-    """Return configured image provider (fal / openai / gemini / mock)."""
+    """Return configured image provider (fal / openai / gemini / higgsfield / mock)."""
     settings = get_settings()
     choice = settings.image_provider.lower()
+
+    if choice == "higgsfield":
+        if not settings.higgsfield_api_key_id or not settings.higgsfield_api_key_secret:
+            logger.warning("IMAGE_PROVIDER=higgsfield but HIGGSFIELD_API_KEY_ID/SECRET is empty — falling back to mock")
+        else:
+            try:
+                from shared.providers.higgsfield_image import HiggsFieldImageProvider
+                logger.info("Using Higgsfield image provider (model=%s)", settings.higgsfield_image_model)
+                return HiggsFieldImageProvider(
+                    api_key_id=settings.higgsfield_api_key_id,
+                    api_key_secret=settings.higgsfield_api_key_secret,
+                    default_model=settings.higgsfield_image_model,
+                    timeout_sec=settings.provider_timeout_sec,
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize Higgsfield image provider, falling back to mock: %s", exc)
 
     if choice == "fal":
         if not settings.fal_key:
@@ -128,6 +144,23 @@ def get_video_provider() -> VideoProvider:
                 )
             except Exception as exc:
                 logger.warning("Failed to initialize Luma provider, falling back to mock: %s", exc)
+
+    if choice == "higgsfield":
+        if not settings.higgsfield_api_key_id or not settings.higgsfield_api_key_secret:
+            logger.warning("VIDEO_PROVIDER=higgsfield but HIGGSFIELD_API_KEY_ID/SECRET is empty — falling back to mock")
+        else:
+            try:
+                from shared.providers.higgsfield_video import HiggsFieldVideoProvider
+                logger.info("Using Higgsfield video provider (model=%s)", settings.higgsfield_model)
+                return HiggsFieldVideoProvider(
+                    api_key_id=settings.higgsfield_api_key_id,
+                    api_key_secret=settings.higgsfield_api_key_secret,
+                    fal_key=settings.fal_key,
+                    default_model=settings.higgsfield_model,
+                    timeout_sec=settings.provider_timeout_sec,
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize Higgsfield provider, falling back to mock: %s", exc)
 
     from shared.providers.mock_video import MockVideoProvider
     return MockVideoProvider()

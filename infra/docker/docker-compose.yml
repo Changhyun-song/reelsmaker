@@ -67,6 +67,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-reelsmaker}:${POSTGRES_PASSWORD:-reelsmaker}@postgres:5432/${POSTGRES_DB:-reelsmaker}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-reelsmaker}
@@ -77,6 +78,8 @@ services:
       FAL_KEY: ${FAL_KEY:-}
       RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
       LUMA_API_KEY: ${LUMA_API_KEY:-}
+      HIGGSFIELD_API_KEY_ID: ${HIGGSFIELD_API_KEY_ID:-}
+      HIGGSFIELD_API_KEY_SECRET: ${HIGGSFIELD_API_KEY_SECRET:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mock}
       VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
@@ -87,6 +90,8 @@ services:
       RUNWAY_MODEL: ${RUNWAY_MODEL:-gen4_turbo}
       KLING_MODEL: ${KLING_MODEL:-fal-ai/kling-video/v2/master/image-to-video}
       LUMA_MODEL: ${LUMA_MODEL:-ray-2}
+      HIGGSFIELD_MODEL: ${HIGGSFIELD_MODEL:-higgsfield-ai/dop/standard}
+      HIGGSFIELD_IMAGE_MODEL: ${HIGGSFIELD_IMAGE_MODEL:-higgsfield-ai/soul/standard}
       ELEVENLABS_MODEL: ${ELEVENLABS_MODEL:-eleven_multilingual_v2}
       ELEVENLABS_DEFAULT_VOICE: ${ELEVENLABS_DEFAULT_VOICE:-}
       PROVIDER_TIMEOUT_SEC: ${PROVIDER_TIMEOUT_SEC:-120}
@@ -108,6 +113,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-reelsmaker}:${POSTGRES_PASSWORD:-reelsmaker}@postgres:5432/${POSTGRES_DB:-reelsmaker}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-reelsmaker}
@@ -118,6 +124,8 @@ services:
       FAL_KEY: ${FAL_KEY:-}
       RUNWAY_API_KEY: ${RUNWAY_API_KEY:-}
       LUMA_API_KEY: ${LUMA_API_KEY:-}
+      HIGGSFIELD_API_KEY_ID: ${HIGGSFIELD_API_KEY_ID:-}
+      HIGGSFIELD_API_KEY_SECRET: ${HIGGSFIELD_API_KEY_SECRET:-}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-mock}
       VIDEO_PROVIDER: ${VIDEO_PROVIDER:-mock}
@@ -128,6 +136,8 @@ services:
       RUNWAY_MODEL: ${RUNWAY_MODEL:-gen4_turbo}
       KLING_MODEL: ${KLING_MODEL:-fal-ai/kling-video/v2/master/image-to-video}
       LUMA_MODEL: ${LUMA_MODEL:-ray-2}
+      HIGGSFIELD_MODEL: ${HIGGSFIELD_MODEL:-higgsfield-ai/dop/standard}
+      HIGGSFIELD_IMAGE_MODEL: ${HIGGSFIELD_IMAGE_MODEL:-higgsfield-ai/soul/standard}
       ELEVENLABS_MODEL: ${ELEVENLABS_MODEL:-eleven_multilingual_v2}
       ELEVENLABS_DEFAULT_VOICE: ${ELEVENLABS_DEFAULT_VOICE:-}
       PROVIDER_TIMEOUT_SEC: ${PROVIDER_TIMEOUT_SEC:-120}
@@ -145,6 +155,8 @@ services:
       - "${WEB_PORT:-3000}:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+    volumes:
+      - ../../apps/web/src:/app/src
     depends_on:
       - api
 

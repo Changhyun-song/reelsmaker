@@ -3087,6 +3087,11 @@ export default function ProjectDetailPage({
   const [submitting, setSubmitting] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [easyMode, setEasyMode] = useState(true);
+  const [progress, setProgress] = useState<{
+    script: boolean; scenes: number; shots: number; frames: number;
+    images: number; videos: number; voices: number; subtitles: number;
+    timelines: number; renders: number; active_jobs: { id: string; job_type: string; status: string; progress: number }[];
+  } | null>(null);
 
   const [topic, setTopic] = useState("");
   const [audience, setAudience] = useState("");
@@ -3116,7 +3121,14 @@ export default function ProjectDetailPage({
     try { const r = await fetch(apiUrl(`/api/jobs/${job.id}`)); if (r.ok) { const u: Job = await r.json(); setJob(u); if (u.status === "completed" || u.status === "failed") done(); } } catch {}
   }, []);
 
-  useEffect(() => { fetchProject(); fetchVersions(); }, [fetchProject, fetchVersions]);
+  const fetchProgress = useCallback(async () => {
+    try {
+      const r = await fetch(apiUrl(`/api/projects/${projectId}/progress`));
+      if (r.ok) setProgress(await r.json());
+    } catch {}
+  }, [projectId]);
+
+  useEffect(() => { fetchProject(); fetchVersions(); fetchProgress(); }, [fetchProject, fetchVersions, fetchProgress]);
   useEffect(() => { if (activeVersion) fetchScenes(activeVersion.id); else setScenes([]); }, [activeVersion, fetchScenes]);
   useEffect(() => {
     fetch(apiUrl("/api/health")).then(r => r.json()).then(d => {
@@ -3124,6 +3136,10 @@ export default function ProjectDetailPage({
       setHasApiKey(text !== "none");
     }).catch(() => {});
   }, []);
+  useEffect(() => {
+    const id = setInterval(fetchProgress, 3000);
+    return () => clearInterval(id);
+  }, [fetchProgress]);
 
   useEffect(() => {
     if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") return;
@@ -3171,21 +3187,39 @@ export default function ProjectDetailPage({
   const isSceneJobRunning = sceneJob && sceneJob.status !== "completed" && sceneJob.status !== "failed";
   const totalSceneDur = scenes.reduce((s, sc) => s + (sc.duration_estimate_sec || 0), 0);
 
-  const hasScript = !!activeVersion?.plan_json;
-  const hasScenes = scenes.length > 0;
+  const hasScript = !!activeVersion?.plan_json || !!progress?.script;
+  const hasScenes = scenes.length > 0 || (progress?.scenes ?? 0) > 0;
+  const hasShots = (progress?.shots ?? 0) > 0;
+  const hasFrames = (progress?.frames ?? 0) > 0;
+  const hasImages = (progress?.images ?? 0) > 0;
+  const hasVideos = (progress?.videos ?? 0) > 0;
+  const hasVoices = (progress?.voices ?? 0) > 0;
+  const hasSubtitles = (progress?.subtitles ?? 0) > 0;
+  const hasTimelines = (progress?.timelines ?? 0) > 0;
+  const hasRenders = (progress?.renders ?? 0) > 0;
+
+  const activeJobTypes = new Set((progress?.active_jobs ?? []).map(j => j.job_type));
+  const isAnyJobRunning = (types: string[]) => types.some(t => activeJobTypes.has(t));
 
   const stepStatuses: Record<WorkspaceSection, StepStatus> = {
     overview: "complete",
-    script: isScriptJobRunning ? "in_progress" : hasScript ? "complete" : "available",
-    structure: isSceneJobRunning ? "in_progress" : hasScenes ? "complete" : hasScript ? "available" : "locked",
-    style: "available",
-    images: hasScenes ? "available" : "locked",
-    videos: hasScenes ? "available" : "locked",
-    "tts-subtitle": hasScenes ? "available" : "locked",
-    timeline: hasScenes ? "available" : "locked",
-    render: hasScenes ? "available" : "locked",
+    script: isScriptJobRunning || isAnyJobRunning(["generate_script"])
+      ? "in_progress" : hasScript ? "complete" : "available",
+    structure: isSceneJobRunning || isAnyJobRunning(["plan_scenes", "plan_shots", "plan_frames"])
+      ? "in_progress" : (hasShots && hasFrames) ? "complete" : hasScenes ? "available" : hasScript ? "available" : "locked",
+    style: hasScenes ? "available" : "locked",
+    images: isAnyJobRunning(["generate_image", "generate_images"])
+      ? "in_progress" : hasImages ? "complete" : hasFrames ? "available" : "locked",
+    videos: isAnyJobRunning(["generate_video", "generate_videos"])
+      ? "in_progress" : hasVideos ? "complete" : hasImages ? "available" : "locked",
+    "tts-subtitle": isAnyJobRunning(["generate_tts", "generate_subtitles"])
+      ? "in_progress" : (hasVoices && hasSubtitles) ? "complete" : hasVoices ? "available" : hasScenes ? "available" : "locked",
+    timeline: isAnyJobRunning(["compose_timeline"])
+      ? "in_progress" : hasTimelines ? "complete" : (hasVideos || hasImages) ? "available" : "locked",
+    render: isAnyJobRunning(["render"])
+      ? "in_progress" : hasRenders ? "complete" : hasTimelines ? "available" : "locked",
     qa: activeVersion ? "available" : "locked",
-    export: "available",
+    export: hasRenders ? "complete" : "available",
   };
 
   const sidebarVersionList = (

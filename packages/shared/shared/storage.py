@@ -71,11 +71,15 @@ def upload_bytes(
 
 
 def get_presigned_url(key: str, expires_in: int = 3600) -> str:
-    return _get_client().generate_presigned_url(
+    url = _get_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": _bucket(), "Key": key},
         ExpiresIn=expires_in,
     )
+    settings = get_settings()
+    if settings.s3_public_endpoint and settings.s3_endpoint != settings.s3_public_endpoint:
+        url = url.replace(settings.s3_endpoint, settings.s3_public_endpoint, 1)
+    return url
 
 
 def download_to_file(key: str, local_path: str) -> str:

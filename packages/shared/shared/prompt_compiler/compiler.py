@@ -1,10 +1,23 @@
-"""Pure-function prompt compiler.
+"""Quality-first, provider-aware prompt compiler.
 
 All functions take plain Pydantic data objects (no DB, no async) so they are
 trivially testable. The single entry point is :func:`compile_full`.
+
+Prompt structure follows a block-based sentence order instead of comma soup:
+  A. Core shot sentence
+  B. Composition + subject position
+  C. Character identity lock
+  D. Camera + lens
+  E. Lighting
+  F. Background layers
+  G. Mood + atmosphere
+  H. Style / render keywords
+  I. Continuity block
 """
 
 from __future__ import annotations
+
+import re
 
 from shared.prompt_compiler.types import (
     CharacterContext,
@@ -12,9 +25,59 @@ from shared.prompt_compiler.types import (
     CompilerContext,
     ContinuityContext,
     FrameContext,
+    QualityMode,
     ShotContext,
     StyleContext,
 )
+
+# ── Negative prompt baselines ────────────────────────
+
+IMAGE_NEGATIVE_BASELINE = [
+    "text", "watermark", "logo", "blurry", "low detail", "extra fingers",
+    "extra limbs", "bad anatomy", "duplicated subject", "deformed face",
+    "asymmetrical eyes", "floating objects", "inconsistent shadows",
+]
+
+VIDEO_NEGATIVE_BASELINE = [
+    "temporal flicker", "frame jitter", "morphing face", "warped hands",
+    "rubber limbs", "sudden camera shake", "inconsistent lighting",
+    "subtitle text", "watermark", "compression artifacts",
+]
+
+# Low-priority style tokens that can be trimmed when prompt is too long
+_LOW_PRIORITY_STYLE_WORDS = {
+    "masterpiece", "best quality", "ultra detailed", "8k", "4k", "uhd",
+    "photorealistic", "hyperrealistic", "professional", "award-winning",
+    "trending on artstation", "highly detailed", "sharp focus",
+    "studio quality", "hdr", "octane render", "unreal engine",
+}
+
+_MAX_PROMPT_LENGTH = 1500
+
+# ── Motion sentence templates ────────────────────────
+
+_MOTION_TEMPLATES: dict[str, str] = {
+    "static": "Subtle changes only — slight pose shifts and natural micro-expressions, no camera movement.",
+    "slow_pan_left": "Smooth lateral reveal panning left, subject scale stays constant as background slides rightward.",
+    "slow_pan_right": "Smooth lateral reveal panning right, subject scale stays constant as background slides leftward.",
+    "pan_left": "Camera pans left with moderate speed, maintaining subject framing while revealing new environment.",
+    "pan_right": "Camera pans right with moderate speed, maintaining subject framing while revealing new environment.",
+    "tilt_up": "Camera tilts upward gradually, revealing higher elements while lower portion exits frame.",
+    "tilt_down": "Camera tilts downward gradually, revealing lower elements while upper portion exits frame.",
+    "dolly_in": "Camera physically moves closer — subject grows larger in frame, background recedes with natural parallax.",
+    "dolly_out": "Camera physically pulls back — subject becomes smaller, more environment revealed with depth perspective.",
+    "push_in": "Steady push toward subject, increasing intimacy and focus, background gradually blurs.",
+    "zoom_in": "Tighter framing without perspective shift — subject fills more frame, no parallax change.",
+    "zoom_out": "Wider framing without perspective shift — more environment visible, subject scale decreases.",
+    "tracking_left": "Camera tracks laterally left alongside subject, maintaining relative position with parallax shift.",
+    "tracking_right": "Camera tracks laterally right alongside subject, maintaining relative position with parallax shift.",
+    "tracking_forward": "Camera moves forward tracking subject, background parallax reveals spatial depth.",
+    "crane_up": "Camera rises vertically, creating an ascending reveal of the scene from below.",
+    "crane_down": "Camera descends vertically, settling into the scene from above.",
+    "handheld": "Organic handheld camera movement with natural micro-shake, creating documentary intimacy.",
+    "orbit_left": "Camera orbits left around subject, maintaining focus while background rotates behind.",
+    "orbit_right": "Camera orbits right around subject, maintaining focus while background rotates behind.",
+}
 
 
 # ── Internal helpers ──────────────────────────────────
@@ -22,6 +85,60 @@ from shared.prompt_compiler.types import (
 
 def _join(*parts: str, sep: str = ", ") -> str:
     return sep.join(p.strip() for p in parts if p and p.strip())
+
+
+def _sentence_join(*parts: str) -> str:
+    """Join non-empty parts with period-space, forming block sentences."""
+    cleaned = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        if not p.endswith((".","!","?")):
+            p = p + "."
+        cleaned.append(p)
+    return " ".join(cleaned)
+
+
+def _dedupe_tokens(text: str, sep: str = ",") -> str:
+    """Remove duplicate comma-separated tokens (case-insensitive)."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for token in text.split(sep):
+        t = token.strip()
+        key = t.lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(t)
+    return f"{sep} ".join(result)
+
+
+def _trim_prompt(prompt: str, max_len: int = _MAX_PROMPT_LENGTH) -> str:
+    """Trim prompt to max_len, removing low-priority style keywords first."""
+    if len(prompt) <= max_len:
+        return prompt
+
+    tokens = [t.strip() for t in prompt.split(",")]
+    high: list[str] = []
+    low: list[str] = []
+    for t in tokens:
+        if t.lower() in _LOW_PRIORITY_STYLE_WORDS:
+            low.append(t)
+        else:
+            high.append(t)
+
+    result = ", ".join(high)
+    if len(result) <= max_len:
+        remaining = max_len - len(result) - 2
+        for l_tok in low:
+            candidate = result + ", " + l_tok
+            if len(candidate) <= max_len:
+                result = candidate
+            else:
+                break
+        return result
+
+    return result[:max_len - 3] + "..."
 
 
 def _build_character_snippet(chars: list[CharacterContext]) -> str:
@@ -59,11 +176,6 @@ def _build_character_snippet(chars: list[CharacterContext]) -> str:
     return "; ".join(snippets)
 
 
-def _build_scene_atmosphere(ctx: CompilerContext) -> str:
-    scene = ctx.scene
-    return _join(scene.setting, scene.mood, scene.emotional_tone)
-
-
 def _build_camera_description(shot: ShotContext, frame: FrameContext) -> str:
     parts: list[str] = []
     if frame.camera_angle:
@@ -74,6 +186,45 @@ def _build_camera_description(shot: ShotContext, frame: FrameContext) -> str:
     if frame.lens_feel:
         parts.append(frame.lens_feel)
     return _join(*parts)
+
+
+def _build_scene_atmosphere(ctx: CompilerContext) -> str:
+    scene = ctx.scene
+    return _join(scene.setting, scene.mood, scene.emotional_tone)
+
+
+def _quality_render_keywords(mode: QualityMode) -> str:
+    if mode == "speed":
+        return ""
+    if mode == "quality":
+        return "cinematic 8K, photorealistic detail, ray-traced global illumination"
+    return "cinematic quality, sharp detail"
+
+
+def _build_motion_sentence(
+    camera_motion: str,
+    asset_strategy: str,
+    duration_sec: float,
+) -> str:
+    """Build a motion description sentence based on camera motion type."""
+    motion = camera_motion.lower().strip() if camera_motion else "static"
+
+    if asset_strategy == "still_image":
+        return "Static frame — no motion, hold composition steady."
+
+    template = _MOTION_TEMPLATES.get(motion)
+    if not template:
+        if "pan" in motion:
+            template = f"Camera {motion.replace('_', ' ')}, smooth lateral movement maintaining subject framing."
+        elif "track" in motion:
+            template = f"Camera {motion.replace('_', ' ')}, following subject with parallax depth."
+        else:
+            template = _MOTION_TEMPLATES["static"]
+
+    if asset_strategy == "direct_video":
+        template = template + " Emphasize fluid, continuous action with natural motion dynamics."
+
+    return template
 
 
 # ── Continuity compilation ────────────────────────────
@@ -89,12 +240,10 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     cont = ctx.continuity
     style = ctx.style
 
-    # Style anchor (from preset or continuity profile)
     anchor = style.style_anchor or cont.style_anchor_summary
     if anchor:
         parts.append(f"STYLE ANCHOR: {anchor}")
 
-    # Color consistency
     color_parts: list[str] = []
     if cont.color_palette_lock:
         color_parts.append(cont.color_palette_lock)
@@ -107,22 +256,18 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     if color_parts:
         parts.append(f"COLOR LOCK: {', '.join(color_parts)}")
 
-    # Lighting anchor
     light = cont.lighting_anchor or style.lighting_rules
     if light:
         parts.append(f"LIGHTING BASELINE: {light}")
 
-    # Texture/depth
     tex_parts = [p for p in [style.texture_quality, style.depth_style] if p]
     if tex_parts:
         parts.append(f"SURFACE: {', '.join(tex_parts)}")
 
-    # Environment consistency
     env = cont.environment_consistency or style.environment_rules
     if env:
         parts.append(f"ENVIRONMENT RULES: {env}")
 
-    # Character locks
     char_locks: list[str] = []
     if cont.character_lock_notes:
         char_locks.append(cont.character_lock_notes)
@@ -139,7 +284,6 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     if char_locks:
         parts.append(f"CHARACTER LOCK: {' | '.join(char_locks)}")
 
-    # Temporal rules
     if cont.temporal_rules:
         parts.append(f"TEMPORAL: {cont.temporal_rules}")
 
@@ -164,85 +308,104 @@ def _build_continuity_negative(ctx: CompilerContext) -> list[str]:
 
 
 def compile_image_prompt(ctx: CompilerContext) -> str:
-    """Build a detailed image generation prompt from all context layers."""
+    """Build a detailed image generation prompt using block-based sentence structure.
+
+    Block order:
+      A. Core shot sentence
+      B. Composition + subject position
+      C. Character identity lock
+      D. Camera + lens
+      E. Lighting
+      F. Background layers
+      G. Mood + atmosphere
+      H. Style / render keywords
+      I. Continuity block
+    """
     style = ctx.style
     shot = ctx.shot
     frame = ctx.frame
+    mode = ctx.quality_mode
 
-    segments: list[str] = []
+    blocks: list[str] = []
 
-    # 1. Style prefix
+    # Style prefix (if present)
     if style.prompt_prefix:
-        segments.append(style.prompt_prefix.rstrip(",").strip())
+        blocks.append(style.prompt_prefix.rstrip(",").strip())
 
-    # 2. Core visual description from shot
+    # A. Core shot sentence
     if shot.description:
-        segments.append(shot.description)
+        blocks.append(shot.description)
 
-    # 3. Frame-specific composition & action
-    frame_parts: list[str] = []
+    # B. Composition + subject position
+    comp_parts: list[str] = []
     if frame.composition:
-        frame_parts.append(frame.composition)
-    if frame.action_pose:
-        frame_parts.append(frame.action_pose)
+        comp_parts.append(frame.composition)
     if frame.subject_position:
-        frame_parts.append(f"subject at {frame.subject_position}")
-    if frame_parts:
-        segments.append(_join(*frame_parts))
+        comp_parts.append(f"Subject placed at {frame.subject_position}")
+    if frame.action_pose:
+        comp_parts.append(frame.action_pose)
+    if comp_parts:
+        blocks.append(_sentence_join(*comp_parts))
 
-    # 4. Characters (now with extended identity fields)
+    # C. Character identity lock
     char_snippet = _build_character_snippet(ctx.characters)
     if char_snippet:
-        segments.append(char_snippet)
+        blocks.append(char_snippet)
 
-    # 5. Camera
+    # D. Camera + lens
     cam = _build_camera_description(shot, frame)
     if cam:
-        segments.append(cam)
+        blocks.append(cam)
 
-    # 6. Lighting (frame > continuity anchor > style fallback)
+    # E. Lighting (frame > continuity anchor > style fallback)
     lighting = frame.lighting or ""
     if not lighting and ctx.continuity.enabled and ctx.continuity.lighting_anchor:
         lighting = ctx.continuity.lighting_anchor
     if not lighting and style.lighting_rules:
         lighting = style.lighting_rules
     if lighting:
-        segments.append(lighting)
+        blocks.append(lighting)
 
-    # 7. Background
-    if frame.background_description:
-        segments.append(f"background: {frame.background_description}")
-    elif shot.environment:
-        segments.append(f"background: {shot.environment}")
+    # F. Background layers
+    bg = frame.background_description or shot.environment
+    if bg:
+        blocks.append(f"Background: {bg}")
 
-    # 8. Mood / atmosphere
-    atmosphere = _join(
-        frame.mood or shot.emotion or "",
-        _build_scene_atmosphere(ctx),
-    )
-    if atmosphere:
-        segments.append(atmosphere)
+    # G. Mood + atmosphere
+    mood_parts: list[str] = []
+    if frame.mood:
+        mood_parts.append(frame.mood)
+    elif shot.emotion:
+        mood_parts.append(shot.emotion)
+    scene_atmo = _build_scene_atmosphere(ctx)
+    if scene_atmo:
+        mood_parts.append(scene_atmo)
+    if mood_parts:
+        blocks.append(_join(*mood_parts))
 
-    # 9. Style keywords & rendering + texture/depth
-    style_parts = [style.style_keywords, style.rendering_style, style.color_palette]
-    if style.texture_quality:
-        style_parts.append(style.texture_quality)
-    if style.depth_style:
-        style_parts.append(style.depth_style)
-    style_tail = _join(*[p for p in style_parts if p])
-    if style_tail:
-        segments.append(style_tail)
+    # H. Style / render keywords + quality mode boost
+    style_parts = [p for p in [
+        style.style_keywords, style.rendering_style, style.color_palette,
+        style.texture_quality, style.depth_style,
+    ] if p]
+    quality_kw = _quality_render_keywords(mode)
+    if quality_kw:
+        style_parts.append(quality_kw)
+    if style_parts:
+        blocks.append(_join(*style_parts))
 
-    # 10. Continuity enforcement block
+    # I. Continuity enforcement block
     cont_block = compile_continuity_block(ctx)
     if cont_block:
-        segments.append(f"[{cont_block}]")
+        blocks.append(f"[{cont_block}]")
 
-    # 11. Style suffix
+    # Style suffix
     if style.prompt_suffix:
-        segments.append(style.prompt_suffix.strip())
+        blocks.append(style.prompt_suffix.strip())
 
-    return _join(*segments)
+    raw = _join(*blocks, sep=". ") if mode == "quality" else _join(*blocks)
+    deduped = _dedupe_tokens(raw)
+    return _trim_prompt(deduped)
 
 
 def compile_concise_prompt(ctx: CompilerContext) -> str:
@@ -269,82 +432,116 @@ def compile_concise_prompt(ctx: CompilerContext) -> str:
 
 
 def compile_video_prompt(ctx: CompilerContext) -> str:
-    """Build a motion-focused video generation prompt."""
+    """Build a motion-focused video generation prompt with camera-aware sentences."""
     shot = ctx.shot
     frame = ctx.frame
     style = ctx.style
+    mode = ctx.quality_mode
 
     segments: list[str] = []
 
     if style.prompt_prefix:
         segments.append(style.prompt_prefix.rstrip(",").strip())
 
+    # Core visual description
     if shot.description:
         segments.append(shot.description)
 
-    # Motion description
-    motion_parts: list[str] = []
-    if shot.camera_movement and shot.camera_movement != "static":
-        motion_parts.append(f"camera motion: {shot.camera_movement}")
-    if frame.action_pose:
-        motion_parts.append(f"action: {frame.action_pose}")
-    if motion_parts:
-        segments.append(_join(*motion_parts))
+    # Motion sentence based on camera_motion + asset_strategy
+    motion_sentence = _build_motion_sentence(
+        shot.camera_movement or "static",
+        shot.asset_strategy or "image_to_video",
+        shot.duration_sec,
+    )
+    segments.append(motion_sentence)
 
+    # Action/pose
+    if frame.action_pose:
+        segments.append(f"Action: {frame.action_pose}")
+
+    # Camera + lens
     cam = _build_camera_description(shot, frame)
     if cam:
         segments.append(cam)
 
+    # Background
     if frame.background_description:
-        segments.append(f"background: {frame.background_description}")
+        segments.append(f"Background: {frame.background_description}")
 
-    atmosphere = _join(frame.mood or shot.emotion or "", _build_scene_atmosphere(ctx))
-    if atmosphere:
-        segments.append(atmosphere)
+    # Mood + atmosphere
+    mood_parts: list[str] = []
+    if frame.mood:
+        mood_parts.append(frame.mood)
+    elif shot.emotion:
+        mood_parts.append(shot.emotion)
+    scene_atmo = _build_scene_atmosphere(ctx)
+    if scene_atmo:
+        mood_parts.append(scene_atmo)
+    if mood_parts:
+        segments.append(_join(*mood_parts))
 
+    # Style keywords
     style_tail = _join(style.style_keywords, style.rendering_style)
+    if mode == "quality" and style_tail:
+        style_tail += ", cinematic motion, smooth temporal coherence"
     if style_tail:
         segments.append(style_tail)
 
-    # Continuity enforcement in video too
+    # Continuity enforcement
     cont_block = compile_continuity_block(ctx)
     if cont_block:
         segments.append(f"[{cont_block}]")
 
+    # Duration always last
     if shot.duration_sec:
-        segments.append(f"duration: {shot.duration_sec}s")
+        segments.append(f"Duration: {shot.duration_sec:.1f}s")
 
-    return _join(*segments)
+    raw = _join(*segments)
+    return _dedupe_tokens(raw)
 
 
-def compile_negative_prompt(ctx: CompilerContext) -> str:
-    """Merge style negatives + frame forbidden elements + continuity drift."""
+def compile_negative_prompt(
+    ctx: CompilerContext,
+    *,
+    media_type: str = "image",
+) -> str:
+    """Merge baseline negatives + style negatives + frame forbidden elements +
+    continuity drift prevention. Deduplicated."""
     parts: list[str] = []
 
+    # Baseline cluster
+    if media_type == "video":
+        parts.extend(VIDEO_NEGATIVE_BASELINE)
+    else:
+        parts.extend(IMAGE_NEGATIVE_BASELINE)
+
+    # Style negatives
     if ctx.style.negative_prompt:
-        parts.append(ctx.style.negative_prompt.strip())
-
+        parts.extend(t.strip() for t in ctx.style.negative_prompt.split(",") if t.strip())
     if ctx.style.negative_rules:
-        parts.append(ctx.style.negative_rules.strip())
+        parts.extend(t.strip() for t in ctx.style.negative_rules.split(",") if t.strip())
 
+    # Frame forbidden elements
     if ctx.frame.forbidden_elements:
-        parts.append(ctx.frame.forbidden_elements.strip())
+        parts.extend(t.strip() for t in ctx.frame.forbidden_elements.split(",") if t.strip())
 
+    # Character forbidden changes
     for char in ctx.characters:
         if char.forbidden_changes:
-            parts.append(char.forbidden_changes.strip())
+            parts.extend(t.strip() for t in char.forbidden_changes.split(",") if t.strip())
 
-    # Add continuity-derived drift prevention
-    parts.extend(_build_continuity_negative(ctx))
+    # Continuity-derived drift prevention
+    for drift in _build_continuity_negative(ctx):
+        parts.extend(t.strip() for t in drift.split(",") if t.strip())
 
+    # Deduplicate (case-insensitive)
     seen: set[str] = set()
     deduped: list[str] = []
-    for part in parts:
-        for token in part.split(","):
-            t = token.strip().lower()
-            if t and t not in seen:
-                seen.add(t)
-                deduped.append(token.strip())
+    for token in parts:
+        key = token.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(token.strip())
 
     return ", ".join(deduped)
 
@@ -354,7 +551,8 @@ def compile_full(ctx: CompilerContext) -> CompiledPrompt:
     detailed = compile_image_prompt(ctx)
     concise = compile_concise_prompt(ctx)
     video = compile_video_prompt(ctx)
-    negative = compile_negative_prompt(ctx)
+    negative_image = compile_negative_prompt(ctx, media_type="image")
+    negative_video = compile_negative_prompt(ctx, media_type="video")
 
     # Build continuity notes from frame + compiled block
     cont_notes_parts: list[str] = []
@@ -374,6 +572,8 @@ def compile_full(ctx: CompilerContext) -> CompiledPrompt:
         "asset_strategy": ctx.shot.asset_strategy,
         "duration_sec": ctx.shot.duration_sec,
         "frame_role": ctx.frame.frame_role,
+        "quality_mode": ctx.quality_mode,
+        "negative_video": negative_video,
     }
 
     if ctx.style.name:
@@ -385,7 +585,7 @@ def compile_full(ctx: CompilerContext) -> CompiledPrompt:
         concise_prompt=concise,
         detailed_prompt=detailed,
         video_prompt=video,
-        negative_prompt=negative,
+        negative_prompt=negative_image,
         continuity_notes=continuity_notes,
         provider_options=provider_options,
     )

@@ -37,8 +37,9 @@ class FixRedirectMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("API starting — debug=%s log_level=%s", settings.debug, settings.log_level)
-    async with async_session_factory() as session:
-        await run_all_seeds(session)
+    if settings.auto_seed:
+        async with async_session_factory() as session:
+            await run_all_seeds(session)
     logger.info("API ready")
     yield
     logger.info("API shutting down")

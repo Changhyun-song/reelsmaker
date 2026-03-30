@@ -16,9 +16,10 @@ from shared.config import get_settings
 from shared.database import async_session_factory
 from shared.models.scene import Scene
 from shared.models.script_version import ScriptVersion
-from shared.providers import ProviderRequest, generate_validated
+from shared.providers import ProviderRequest, generate_validated, generate_validated_with_semantic
 from shared.providers.claude_text import ClaudeTextProvider
 from shared.providers.logger import log_provider_run
+from shared.qa.planning_guards import validate_scene_breakdown_semantic
 from shared.schemas.contracts import SceneBreakdownOutput, SingleSceneOutput
 
 logger = logging.getLogger("reelsmaker.handlers.scene")
@@ -62,10 +63,26 @@ Also output **total_duration_sec** (sum of all scene durations).
 - For videos ≤60s: 3-6 scenes, each 5-20s.
 - For videos 60-180s: 4-10 scenes, each 10-30s.
 
-## BANNED
-- Vague purpose like "continue the story" or "transition".
-- Empty or placeholder setting like "relevant location".
-- visual_intent that just restates the narration in English.
+## BANNED PHRASES (will be auto-rejected if detected)
+- Vague purpose: "continue the story", "transition", "middle part"
+- Generic setting: "an office", "a room", "somewhere", "nice place", "a place",
+  "a studio", "a space", "relevant location", "indoors", "outdoors"
+- Vague visual_intent: "beautiful scene", "nice background", "stunning visuals",
+  "aesthetic", "gorgeous", "amazing visual"
+- visual_intent that just restates the narration in English without visual specifics
+
+## SETTING STRICTNESS
+- MUST include: materials/textures, key objects (≥2), lighting condition, spatial feel
+- Bad: "an office" → Good: "modern open-plan office with exposed concrete ceiling,
+  standing desks with dual monitors, floor-to-ceiling windows showing rainy cityscape,
+  overhead pendant Edison bulbs casting warm pools of light"
+
+## VISUAL_INTENT STRICTNESS
+- MUST include: dominant color temperature/palette AND specific camera style AND
+  at least 2 concrete visual objects or actions
+- Bad: "Show the concept visually" → Good: "Tight close-ups of fingers tapping phone
+  screen alternating with floating UI mockup overlays, cool blue-teal palette with
+  warm amber accent highlights, smooth tracking movements at 24fps"
 - Scenes shorter than 3s or longer than 60s for short-form content.
 
 Output ONLY valid JSON — no markdown fences, no commentary."""
@@ -182,8 +199,10 @@ async def handle_scene_plan(job_id: str, **params) -> dict:
     await _update_job_progress(job_id, 10)
 
     try:
-        response, result = await generate_validated(
-            provider, request, SceneBreakdownOutput, max_attempts=3
+        response, result = await generate_validated_with_semantic(
+            provider, request, SceneBreakdownOutput,
+            semantic_guard=validate_scene_breakdown_semantic,
+            max_attempts=3, max_semantic_retries=2,
         )
     except Exception as exc:
         await log_provider_run(

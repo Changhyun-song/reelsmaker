@@ -17,6 +17,24 @@ from shared.providers.image_base import (
 
 logger = logging.getLogger("reelsmaker.providers.fal_image")
 
+# Quality-mode presets: values are applied as defaults, never overriding
+# explicit provider_options from the caller.
+_QUALITY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "speed": {
+        "num_inference_steps": 4,
+        "enable_safety_checker": False,
+    },
+    "balanced": {
+        "num_inference_steps": 8,
+        "enable_safety_checker": False,
+    },
+    "quality": {
+        "num_inference_steps": 20,
+        "guidance_scale": 7.5,
+        "enable_safety_checker": False,
+    },
+}
+
 
 class FalImageProvider(ImageProvider):
     """Generate images using fal.ai FLUX models.
@@ -50,6 +68,13 @@ class FalImageProvider(ImageProvider):
         model = request.model or self._default_model
         start = time.monotonic()
 
+        quality_mode = request.provider_options.get("quality_mode", "balanced")
+        if quality_mode not in _QUALITY_DEFAULTS:
+            quality_mode = "balanced"
+
+        # Start with quality-mode defaults, then layer explicit options on top
+        quality_base = dict(_QUALITY_DEFAULTS[quality_mode])
+
         arguments: dict[str, Any] = {
             "prompt": request.prompt,
             "image_size": {
@@ -58,8 +83,13 @@ class FalImageProvider(ImageProvider):
             },
             "num_images": request.num_variants,
             "output_format": "png",
-            "enable_safety_checker": False,
         }
+
+        # Apply quality defaults (not overriding explicit caller values)
+        for k, v in quality_base.items():
+            if k not in request.provider_options:
+                arguments[k] = v
+
         if request.negative_prompt:
             arguments["negative_prompt"] = request.negative_prompt
         if request.seed is not None:
@@ -67,7 +97,11 @@ class FalImageProvider(ImageProvider):
         if request.guidance_scale is not None:
             arguments["guidance_scale"] = request.guidance_scale
 
-        arguments.update(request.provider_options)
+        # Caller's provider_options take highest priority (skip internal keys)
+        _internal_keys = {"quality_mode", "negative_video"}
+        for k, v in request.provider_options.items():
+            if k not in _internal_keys:
+                arguments[k] = v
 
         import os
         _prev_key = os.environ.get("FAL_KEY")
@@ -113,14 +147,15 @@ class FalImageProvider(ImageProvider):
                     metadata={
                         "fal_url": url,
                         "prompt_preview": request.prompt[:100],
+                        "quality_mode": quality_mode,
                     },
                 ))
 
         total_latency = int((time.monotonic() - start) * 1000)
 
         logger.info(
-            "fal generate: model=%s variants=%d latency=%dms",
-            model, len(images), total_latency,
+            "fal generate: model=%s quality=%s variants=%d latency=%dms",
+            model, quality_mode, len(images), total_latency,
         )
 
         return ImageGenerationResponse(
@@ -132,6 +167,7 @@ class FalImageProvider(ImageProvider):
             metadata={
                 "fal_request_id": result.get("request_id", ""),
                 "has_nsfw": result.get("has_nsfw_concepts", []),
+                "quality_mode": quality_mode,
             },
         )
 

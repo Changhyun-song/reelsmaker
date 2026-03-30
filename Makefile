@@ -1,7 +1,7 @@
 COMPOSE := docker compose --env-file .env -f infra/docker/docker-compose.yml
 
 .PHONY: up down build restart clean logs logs-api logs-worker logs-web ps health \
-        migrate migration seed reset-db test test-api test-smoke shell-api shell-db help
+        migrate migration seed reset-db test test-smoke test-benchmark shell-api shell-db help
 
 ## ── Lifecycle ────────────────────────────────────────
 
@@ -66,6 +66,9 @@ test:            ## Run all tests (inside API container)
 
 test-smoke:      ## Run API smoke tests only
 	$(COMPOSE) exec api python -m pytest tests/test_smoke.py -v
+
+test-benchmark:  ## Run prompt quality benchmark tests
+	$(COMPOSE) exec api python -m pytest tests/test_prompt_benchmark.py -v
 
 ## ── Shell Access ─────────────────────────────────────
 

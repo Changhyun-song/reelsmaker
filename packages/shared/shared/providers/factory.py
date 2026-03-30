@@ -145,6 +145,21 @@ def get_video_provider() -> VideoProvider:
             except Exception as exc:
                 logger.warning("Failed to initialize Luma provider, falling back to mock: %s", exc)
 
+    if choice == "seedance":
+        if not settings.fal_key:
+            logger.warning("VIDEO_PROVIDER=seedance but FAL_KEY is empty — falling back to mock")
+        else:
+            try:
+                from shared.providers.seedance_video import SeedanceVideoProvider
+                logger.info("Using Seedance video provider (model=%s)", settings.seedance_model)
+                return SeedanceVideoProvider(
+                    api_key=settings.fal_key,
+                    default_model=settings.seedance_model,
+                    timeout_sec=settings.provider_timeout_sec,
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize Seedance provider, falling back to mock: %s", exc)
+
     if choice == "higgsfield":
         if not settings.higgsfield_api_key_id or not settings.higgsfield_api_key_secret:
             logger.warning("VIDEO_PROVIDER=higgsfield but HIGGSFIELD_API_KEY_ID/SECRET is empty — falling back to mock")

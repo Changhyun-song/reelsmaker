@@ -168,8 +168,8 @@ async def get_shot_tts_audio_url(
     response_model=list[VoicePreset],
 )
 async def list_available_voices(project_id: UUID):
-    """List available TTS voices (from mock provider)."""
-    from shared.providers.mock_tts import MockTTSProvider
-    provider = MockTTSProvider()
+    """List available TTS voices from the configured provider."""
+    from shared.providers.factory import get_tts_provider
+    provider = get_tts_provider()
     voices = await provider.list_voices()
     return [VoicePreset(**v) for v in voices]

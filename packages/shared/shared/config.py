@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ── AI providers — selection ──────────────────────
     # "mock" uses local placeholder; real provider name enables API calls
     image_provider: str = "mock"       # "mock" | "fal" | "openai" | "gemini" | "higgsfield"
-    video_provider: str = "mock"       # "mock" | "runway" | "kling" | "luma" | "higgsfield"
+    video_provider: str = "mock"       # "mock" | "runway" | "kling" | "luma" | "higgsfield" | "seedance"
     tts_provider: str = "mock"         # "mock" | "elevenlabs"
 
     # ── AI providers — behavior ──────────────────────
@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     luma_model: str = "ray-2"
     higgsfield_model: str = "kling-video/v2.1/pro/image-to-video"
     higgsfield_image_model: str = "google/nano-banana-2"
+    seedance_model: str = "fal-ai/bytedance/seedance/v1/lite/image-to-video"
     elevenlabs_model: str = "eleven_multilingual_v2"
     elevenlabs_default_voice: str = ""
 

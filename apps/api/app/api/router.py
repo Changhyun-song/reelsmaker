@@ -173,10 +173,10 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
     try:
         from app.services.storage import s3_client
-        s3_client.list_buckets()
-        checks["minio"] = "ok"
+        s3_client.head_bucket(Bucket=settings.s3_bucket)
+        checks["storage"] = "ok"
     except Exception as e:
-        checks["minio"] = f"error: {e}"
+        checks["storage"] = f"error: {e}"
 
     checks["providers"] = {
         "image": settings.image_provider,

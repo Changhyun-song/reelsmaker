@@ -1,4 +1,4 @@
-"""Higgsfield image generation provider — Nano Banana Pro / Nano Banana 2 via platform API."""
+"""Higgsfield image generation provider — Nano Banana 2 (google/nano-banana-2) via platform API."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _dimensions_to_resolution(w: int, h: int) -> str:
 
 
 class HiggsFieldImageProvider(ImageProvider):
-    """Generate images via Higgsfield platform (Nano Banana Pro, Nano Banana 2, etc.).
+    """Generate images via Higgsfield platform (Nano Banana 2, etc.).
 
     Uses the same async queue/poll pattern as the Higgsfield video provider.
     Auth: ``Authorization: Key {id}:{secret}``
@@ -58,7 +58,7 @@ class HiggsFieldImageProvider(ImageProvider):
         self,
         api_key_id: str,
         api_key_secret: str,
-        default_model: str = "higgsfield-ai/soul/standard",
+        default_model: str = "google/nano-banana-2",
         timeout_sec: int = 120,
     ):
         if not api_key_id or not api_key_secret:
@@ -189,7 +189,7 @@ class HiggsFieldImageProvider(ImageProvider):
                 return data
             if status in ("failed", "nsfw"):
                 raise RuntimeError(f"Higgsfield image generation {status}: {data}")
-            logger.debug("higgsfield image %s: %s (attempt %d)", request_id, status, attempt + 1)
+            logger.info("higgsfield image polling %s: %s (attempt %d/%d)", request_id, status, attempt + 1, MAX_POLL_ATTEMPTS)
 
         raise TimeoutError(
             f"Higgsfield image request {request_id} timed out after "

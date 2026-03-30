@@ -218,17 +218,38 @@ def validate_shot_breakdown_semantic(output: Any) -> list[str]:
 
         required_elements = {
             "subject/action": bool(re.search(
-                r"(person|woman|man|hand|figure|object|product|screen|device|item|character|people|worker|developer|host|presenter|speaker|child|team|group)",
+                r"(person|woman|man|hand|figure|object|product|screen|device|"
+                r"item|character|people|worker|developer|host|presenter|speaker|"
+                r"child|team|group|cat|dog|animal|bird|pet|silhouette|"
+                r"car|vehicle|tree|plant|flower|food|book|phone|laptop|"
+                r"building|house|tower|bridge|statue|sign|logo|icon|"
+                r"cloud|star|moon|rain|snow|wave|mountain|river|ocean|"
+                r"robot|monster|creature|dragon|sword|ship|plane|"
+                r"cup|glass|bottle|camera|clock|guitar|piano|"
+                r"crowd|audience|dancer|singer|athlete|soldier|"
+                r"text|title|label|number|symbol|pattern|shape)",
                 desc, re.IGNORECASE,
             )),
             "environment/setting": bool(re.search(
                 r"(room|office|desk|studio|outdoor|street|kitchen|background|"
-                r"interior|exterior|wall|floor|table|window|space|scene|setting)",
+                r"interior|exterior|wall|floor|table|window|space|scene|setting|"
+                r"sky|garden|park|forest|beach|ocean|lake|river|mountain|"
+                r"city|urban|suburban|neighborhood|rooftop|balcony|corridor|"
+                r"stage|arena|field|farm|village|alley|highway|tunnel|"
+                r"cafe|restaurant|bar|shop|store|market|library|museum|"
+                r"hospital|school|church|temple|castle|palace|"
+                r"sunset|sunrise|twilight|dawn|dusk|horizon|landscape|"
+                r"underwater|cave|desert|jungle|snow|rain|fog)",
                 desc, re.IGNORECASE,
             )),
             "lighting/mood": bool(re.search(
                 r"(light|shadow|glow|bright|dark|warm|cool|cinematic|mood|"
-                r"ambient|soft|harsh|golden|dramatic|natural|lamp|sun|neon)",
+                r"ambient|soft|harsh|golden|dramatic|natural|lamp|sun|neon|"
+                r"twilight|moonlight|candlelight|firelight|backlit|"
+                r"silhouett|overcast|hazy|misty|foggy|eerie|"
+                r"vibrant|muted|saturated|pastel|monochrome|"
+                r"serene|tense|mysterious|romantic|nostalgic|melanchol|"
+                r"energetic|peaceful|somber|playful|intimate|epic)",
                 desc, re.IGNORECASE,
             )),
         }
@@ -289,7 +310,11 @@ _LIGHTING_ROLE_PATTERN = re.compile(
 _PHYSICAL_POSE_PATTERN = re.compile(
     r"(hand|arm|leg|head|shoulder|lean|sit|stand|hold|grip|touch|point|"
     r"reach|turn|twist|bend|cross|fold|raise|lower|gesture|tilt|gaze|"
-    r"rest|curl|stretch|crouch|kneel|recline|finger|wrist|elbow|torso)",
+    r"rest|curl|stretch|crouch|kneel|recline|finger|wrist|elbow|torso|"
+    r"paw|tail|ear|wing|beak|claw|snout|perch|hover|float|drift|"
+    r"silhouette|posed?|position|facing|toward|away|upright|"
+    r"lying|sleeping|walking|running|jumping|flying|swimming|"
+    r"still|static|frozen|motionless|stationary|suspended)",
     re.IGNORECASE,
 )
 

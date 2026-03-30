@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.config import get_settings
 from shared.database import get_db
+from app.auth import get_current_user
 from app.api.projects import router as projects_router
 from app.api.jobs import router as jobs_router
 from app.api.scripts import router as scripts_router
@@ -26,10 +27,12 @@ from app.api.exports import router as exports_router
 from app.api.evaluations import router as evaluations_router
 from app.api.continuity import router as continuity_router
 from app.api.ops import router as ops_router
+from app.api.billing import router as billing_router
 
 settings = get_settings()
 api_router = APIRouter()
 api_router.include_router(ops_router, prefix="/ops", tags=["ops"])
+api_router.include_router(billing_router, prefix="/billing", tags=["billing"])
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 api_router.include_router(scripts_router, prefix="/projects", tags=["scripts"])
@@ -53,7 +56,11 @@ api_router.include_router(continuity_router, prefix="/projects", tags=["continui
 
 
 @api_router.get("/projects/{project_id}/progress", tags=["projects"])
-async def project_progress(project_id: str, db: AsyncSession = Depends(get_db)):
+async def project_progress(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
     """Return pipeline completion status for each stage."""
     from shared.models import (
         ScriptVersion, Scene, Shot, FrameSpec, Asset,

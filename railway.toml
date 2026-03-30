@@ -1,0 +1,8 @@
+# Railway project configuration
+# This file is at repo root; each service references its own Dockerfile
+# with the root build context so shared packages are available.
+#
+# Services are configured in the Railway dashboard:
+#   - api:    uses apps/api/Dockerfile, start command overrides CMD
+#   - worker: uses apps/worker/Dockerfile
+#   - redis:  Railway plugin (no config needed here)

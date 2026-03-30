@@ -95,6 +95,10 @@ services:
       ELEVENLABS_MODEL: ${ELEVENLABS_MODEL:-eleven_multilingual_v2}
       ELEVENLABS_DEFAULT_VOICE: ${ELEVENLABS_DEFAULT_VOICE:-}
       PROVIDER_TIMEOUT_SEC: ${PROVIDER_TIMEOUT_SEC:-120}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_JWT_ISSUER: ${CLERK_JWT_ISSUER:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,6 +108,7 @@ services:
         condition: service_started
     command: >
       sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    # Production uses: sh start.sh (see Dockerfile CMD)
 
   worker:
     build:

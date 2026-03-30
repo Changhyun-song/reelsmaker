@@ -16,6 +16,7 @@ from shared.models.job import Job
 from shared.models.qa_result import QAResult
 from shared.models.quality_review import QualityReview
 from shared.models.continuity_profile import ContinuityProfile
+from shared.models.subscription import UserSubscription
 
 __all__ = [
     "Base",
@@ -36,4 +37,5 @@ __all__ = [
     "QAResult",
     "QualityReview",
     "ContinuityProfile",
+    "UserSubscription",
 ]

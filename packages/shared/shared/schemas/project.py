@@ -50,6 +50,7 @@ class ProjectResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     id: UUID
+    user_id: str | None = None
     title: str
     description: str | None
     status: str

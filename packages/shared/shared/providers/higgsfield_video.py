@@ -20,8 +20,8 @@ from shared.providers.video_base import (
 logger = logging.getLogger("reelsmaker.providers.higgsfield_video")
 
 BASE_URL = "https://platform.higgsfield.ai"
-DEFAULT_I2V_MODEL = "higgsfield-ai/dop/standard"
-DEFAULT_T2V_MODEL = "higgsfield-ai/soul/standard"
+DEFAULT_I2V_MODEL = "kling-video/v2.1/pro/image-to-video"
+DEFAULT_T2V_MODEL = "kling-video/v2.1/pro/text-to-video"
 POLL_INTERVAL_SEC = 3
 MAX_POLL_ATTEMPTS = 120
 

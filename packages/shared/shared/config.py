@@ -46,16 +46,28 @@ class Settings(BaseSettings):
     runway_model: str = "gen4_turbo"
     kling_model: str = "fal-ai/kling-video/v2/master/image-to-video"
     luma_model: str = "ray-2"
-    higgsfield_model: str = "higgsfield-ai/dop/standard"
-    higgsfield_image_model: str = "higgsfield-ai/soul/standard"
+    higgsfield_model: str = "kling-video/v2.1/pro/image-to-video"
+    higgsfield_image_model: str = "google/nano-banana-2"
     elevenlabs_model: str = "eleven_multilingual_v2"
     elevenlabs_default_voice: str = ""
+
+    # ── Auth (Clerk) ─────────────────────────────────
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    clerk_jwt_issuer: str = ""
+    auth_enabled: bool = False
+
+    # ── Billing (Stripe) ──────────────────────────────
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_pro_monthly: str = ""
+    stripe_price_premium_monthly: str = ""
 
     # ── App behavior ──────────────────────────────────
     debug: bool = True
     log_level: str = "INFO"
     sql_echo: bool = False
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
     auto_seed: bool = False
 
 

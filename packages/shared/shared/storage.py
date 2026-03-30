@@ -13,6 +13,7 @@ from botocore.config import Config
 from shared.config import get_settings
 
 _client = None
+_public_client = None
 
 
 def _get_client():
@@ -30,6 +31,23 @@ def _get_client():
     return _client
 
 
+def _get_public_client():
+    """Client using public endpoint for presigned URLs accessible by browsers."""
+    global _public_client
+    if _public_client is None:
+        settings = get_settings()
+        endpoint = settings.s3_public_endpoint or settings.s3_endpoint
+        _public_client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
+            config=Config(signature_version="s3v4"),
+        )
+    return _public_client
+
+
 def _bucket() -> str:
     return get_settings().s3_bucket
 
@@ -39,7 +57,10 @@ def ensure_bucket() -> None:
     try:
         client.head_bucket(Bucket=_bucket())
     except client.exceptions.ClientError:
-        client.create_bucket(Bucket=_bucket())
+        try:
+            client.create_bucket(Bucket=_bucket())
+        except Exception:
+            pass
 
 
 def generate_storage_key(
@@ -71,15 +92,11 @@ def upload_bytes(
 
 
 def get_presigned_url(key: str, expires_in: int = 3600) -> str:
-    url = _get_client().generate_presigned_url(
+    return _get_public_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": _bucket(), "Key": key},
         ExpiresIn=expires_in,
     )
-    settings = get_settings()
-    if settings.s3_public_endpoint and settings.s3_endpoint != settings.s3_public_endpoint:
-        url = url.replace(settings.s3_endpoint, settings.s3_public_endpoint, 1)
-    return url
 
 
 def download_to_file(key: str, local_path: str) -> str:

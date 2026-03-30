@@ -57,6 +57,8 @@ class GeminiImageProvider(ImageProvider):
         if request.negative_prompt:
             prompt_parts.append(f"Avoid: {request.negative_prompt}")
 
+        aspect = request.provider_options.get("aspect_ratio", "16:9")
+
         images: list[GeneratedImage] = []
 
         for variant_idx in range(request.num_variants):
@@ -64,7 +66,8 @@ class GeminiImageProvider(ImageProvider):
                 model=model,
                 contents=prompt_parts,
                 config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
+                    response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(aspect_ratio=aspect),
                 ),
             )
 

@@ -43,6 +43,7 @@ import GuidedWorkflow from "./guided-workflow";
 import ImageApprovalPanel from "@/features/image-approval/ImageApprovalPanel";
 import StoryboardEditor from "@/features/storyboard/StoryboardEditor";
 import ContinuityBiblePanel from "@/features/prompt-lab/ContinuityBiblePanel";
+import ReleaseChecklist from "@/features/release-check/ReleaseChecklist";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 
@@ -3246,6 +3247,9 @@ export default function ProjectDetailPage({
               />
             </div>
           )}
+
+          {/* Release Verification Checklist */}
+          <ReleaseChecklist projectId={projectId} mode="project" />
 
           {/* Pipeline Inspector */}
           <PipelineInspector projectId={projectId} />

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
+import ReleaseChecklist from "@/features/release-check/ReleaseChecklist";
 
 /* ── Types ──────────────────────────────────────────── */
 
@@ -412,6 +413,12 @@ export default function StatusPage() {
           </div>
         </div>
       )}
+
+      {/* Release Verification */}
+      <div>
+        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-2">릴리스 검수</p>
+        <ReleaseChecklist mode="system" />
+      </div>
 
       {/* Back link */}
       <div className="text-center pt-4">

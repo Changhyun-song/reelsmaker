@@ -49,7 +49,10 @@ async def _find_frame_asset(
     frame_role: str,
     db,
 ) -> Asset | None:
-    """Find the best image asset for a frame role. Prefers is_selected, then latest."""
+    """Find the best image asset for a frame role.
+
+    Priority: approved+selected > approved > selected+ready > ready (latest).
+    """
     frame = (
         await db.execute(
             select(FrameSpec)
@@ -61,37 +64,45 @@ async def _find_frame_asset(
     if not frame:
         return None
 
-    # Prefer selected asset
-    selected = (
-        await db.execute(
-            select(Asset)
-            .where(
-                Asset.parent_type == "frame_spec",
-                Asset.parent_id == frame.id,
-                Asset.asset_type == "image",
-                Asset.status == "ready",
-                Asset.is_selected.is_(True),
-            )
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if selected:
-        return selected
+    # 1. Approved + selected
+    result = (await db.execute(
+        select(Asset).where(
+            Asset.parent_type == "frame_spec", Asset.parent_id == frame.id,
+            Asset.asset_type == "image", Asset.status == "approved",
+            Asset.is_selected.is_(True),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if result:
+        return result
 
-    # Fallback to most recent
-    return (
-        await db.execute(
-            select(Asset)
-            .where(
-                Asset.parent_type == "frame_spec",
-                Asset.parent_id == frame.id,
-                Asset.asset_type == "image",
-                Asset.status == "ready",
-            )
-            .order_by(Asset.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    # 2. Any approved
+    result = (await db.execute(
+        select(Asset).where(
+            Asset.parent_type == "frame_spec", Asset.parent_id == frame.id,
+            Asset.asset_type == "image", Asset.status == "approved",
+        ).order_by(Asset.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if result:
+        return result
+
+    # 3. Selected + ready (not yet reviewed)
+    result = (await db.execute(
+        select(Asset).where(
+            Asset.parent_type == "frame_spec", Asset.parent_id == frame.id,
+            Asset.asset_type == "image", Asset.status == "ready",
+            Asset.is_selected.is_(True),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if result:
+        return result
+
+    # 4. Fallback: most recent ready
+    return (await db.execute(
+        select(Asset).where(
+            Asset.parent_type == "frame_spec", Asset.parent_id == frame.id,
+            Asset.asset_type == "image", Asset.status == "ready",
+        ).order_by(Asset.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
 
 
 async def _next_version(shot_id: uuid.UUID) -> int:

@@ -40,6 +40,7 @@ import RenderPanel from "@/features/render/RenderPanel";
 import CostDashboard from "@/features/studio/CostDashboard";
 import PipelineInspector from "./pipeline-inspector";
 import GuidedWorkflow from "./guided-workflow";
+import ImageApprovalPanel from "@/features/image-approval/ImageApprovalPanel";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 
@@ -94,6 +95,62 @@ function LockedSection({
         className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium transition hover:bg-blue-500"
       >
         이전 단계로 이동
+      </button>
+    </div>
+  );
+}
+
+function ApprovalGateBanner({
+  projectId,
+  onNavigate,
+}: {
+  projectId: string;
+  onNavigate: () => void;
+}) {
+  const [summary, setSummary] = useState<{
+    ready_for_review: number; approved: number; total: number; all_reviewed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch(apiUrl(`/api/projects/${projectId}/approval-summary`))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setSummary(d))
+      .catch(() => {});
+  }, [projectId]);
+
+  if (!summary || summary.all_reviewed) return null;
+
+  const needsReview = summary.ready_for_review > 0;
+  const hasApproved = summary.approved > 0;
+
+  return (
+    <div className={`rounded-lg border p-3 flex items-center justify-between ${
+      needsReview
+        ? "border-amber-800/40 bg-amber-950/20"
+        : "border-neutral-800 bg-neutral-900/50"
+    }`}>
+      <div className="flex items-center gap-3">
+        <span className="text-base">{needsReview ? "⚠️" : "📋"}</span>
+        <div>
+          <p className="text-xs font-medium text-neutral-200">
+            {needsReview
+              ? `${summary.ready_for_review}개 이미지 검토 대기 중`
+              : `${summary.approved}/${summary.total}개 승인됨`}
+          </p>
+          <p className="text-[10px] text-neutral-500">
+            {needsReview
+              ? "승인된 이미지가 비디오 생성에 우선 사용됩니다."
+              : hasApproved
+                ? "승인된 이미지로 비디오를 생성합니다."
+                : "이미지 승인 없이도 비디오 생성은 가능합니다."}
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={onNavigate}
+        className="rounded-md bg-amber-600/20 border border-amber-700/40 px-3 py-1.5 text-[10px] font-medium text-amber-400 hover:bg-amber-600/30 transition shrink-0"
+      >
+        이미지 검토하기
       </button>
     </div>
   );
@@ -3512,6 +3569,22 @@ export default function ProjectDetailPage({
             </>
           )}
 
+          {/* Image Approval Gate */}
+          {allFrames.length > 0 && (
+            <ImageApprovalPanel
+              projectId={projectId}
+              shots={allShots.map((s) => ({ id: s.id, order_index: s.order_index, description: s.description }))}
+              frames={allFrames.map((f) => ({
+                id: f.id,
+                shot_id: f.shot_id,
+                frame_role: f.frame_role || "start",
+                order_index: f.order_index,
+                visual_prompt: f.visual_prompt,
+              }))}
+              onApprovalChange={() => fetchProgress()}
+            />
+          )}
+
           <VoicePicker
             open={showVoicePicker}
             onClose={() => setShowVoicePicker(false)}
@@ -3542,6 +3615,10 @@ export default function ProjectDetailPage({
               Shot 단위로 2~8초 영상 클립을 생성합니다.
             </p>
           </div>
+          {/* Approval gate warning */}
+          {progress && progress.images > 0 && (
+            <ApprovalGateBanner projectId={projectId} onNavigate={() => setSection("images")} />
+          )}
           {!hasScenes ? (
             <LockedSection message="Scene/Shot 구조를 먼저 생성하세요." target="structure" onNavigate={setSection} />
           ) : (

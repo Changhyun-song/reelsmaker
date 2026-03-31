@@ -303,16 +303,16 @@ export default function GuidedWorkflow({
       id: "generate",
       num: 4,
       title: "이미지 · 비디오 생성",
-      description: "각 프레임의 이미지와 비디오 클립을 AI로 생성합니다",
+      description: "각 프레임의 이미지를 생성하고 승인 후 비디오 클립을 생성합니다",
       state: getState("generate", hasImages, hasFrames, ["story_prompts", "image_generate", "video_generate"]),
-      action: hasImages ? (hasVideos ? null : "비디오 생성하러 가기") : hasFrames ? "이미지 생성하러 가기" : null,
-      detail: null,
+      action: hasImages ? (hasVideos ? null : "이미지 승인 · 비디오 생성하기") : hasFrames ? "이미지 생성하러 가기" : null,
+      detail: hasImages && !hasVideos ? "이미지 검토/승인 후 비디오 생성을 권장합니다" : null,
       errorMsg: null,
       counts: (hasImages || hasVideos)
         ? `이미지 ${p?.images ?? 0}개 · 비디오 ${p?.videos ?? 0}개`
         : undefined,
-      doneCondition: "이미지와 비디오가 각 프레임/샷에 대해 생성됨",
-      nextCondition: "이미지가 있으면 오디오/자막 생성 가능",
+      doneCondition: "이미지 승인 및 비디오가 각 프레임/샷에 대해 생성됨",
+      nextCondition: "승인된 이미지 기반으로 비디오 생성 → 오디오/자막 생성 가능",
     },
     {
       id: "audio",

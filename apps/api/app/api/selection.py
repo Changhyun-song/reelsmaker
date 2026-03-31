@@ -26,6 +26,22 @@ class SelectionResponse(BaseModel):
     is_selected: bool
 
 
+class ApprovalRequest(BaseModel):
+    status: str = Field(..., pattern="^(approved|rejected|pending_review)$")
+
+
+class ApprovalResponse(BaseModel):
+    id: str
+    status: str
+    is_selected: bool
+
+
+class BulkApprovalResponse(BaseModel):
+    updated: int
+    approved: int
+    rejected: int
+
+
 class QualityNoteRequest(BaseModel):
     quality_note: str | None = Field(None, max_length=500)
 
@@ -69,8 +85,8 @@ async def select_asset(
         raise HTTPException(404, "Asset not found")
     if asset.project_id != project_id:
         raise HTTPException(404, "Asset not found in this project")
-    if asset.status != "ready":
-        raise HTTPException(400, "Only ready assets can be selected")
+    if asset.status not in ("ready", "approved"):
+        raise HTTPException(400, "Only ready or approved assets can be selected")
 
     await db.execute(
         update(Asset)
@@ -200,6 +216,141 @@ async def update_quality_note(
     await db.refresh(asset)
 
     return QualityNoteResponse(id=str(asset.id), quality_note=asset.quality_note)
+
+
+# ── Image Approval Gate ──────────────────────────────
+
+
+@router.patch(
+    "/{project_id}/assets/{asset_id}/approve",
+    response_model=ApprovalResponse,
+)
+async def approve_asset(
+    project_id: UUID,
+    asset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve an image asset. Auto-selects it if no other is selected for this frame."""
+    asset = (await db.execute(select(Asset).where(Asset.id == asset_id))).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    if asset.project_id != project_id:
+        raise HTTPException(404, "Asset not found in this project")
+
+    asset.status = "approved"
+
+    # Auto-select if nothing else is selected for this frame
+    has_selected = (await db.execute(
+        select(func.count()).where(
+            Asset.parent_type == asset.parent_type,
+            Asset.parent_id == asset.parent_id,
+            Asset.asset_type == asset.asset_type,
+            Asset.is_selected.is_(True),
+        )
+    )).scalar() or 0
+
+    if has_selected == 0:
+        asset.is_selected = True
+
+    await db.flush()
+    await db.refresh(asset)
+    return ApprovalResponse(id=str(asset.id), status=asset.status, is_selected=asset.is_selected)
+
+
+@router.patch(
+    "/{project_id}/assets/{asset_id}/reject",
+    response_model=ApprovalResponse,
+)
+async def reject_asset(
+    project_id: UUID,
+    asset_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject an image asset. If it was selected, deselect it and pick another approved one."""
+    asset = (await db.execute(select(Asset).where(Asset.id == asset_id))).scalar_one_or_none()
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    if asset.project_id != project_id:
+        raise HTTPException(404, "Asset not found in this project")
+
+    asset.status = "rejected"
+    was_selected = asset.is_selected
+    asset.is_selected = False
+    await db.flush()
+
+    # If this was the selected one, auto-select the first approved sibling
+    if was_selected:
+        alt = (await db.execute(
+            select(Asset).where(
+                Asset.parent_type == asset.parent_type,
+                Asset.parent_id == asset.parent_id,
+                Asset.asset_type == asset.asset_type,
+                Asset.status == "approved",
+                Asset.id != asset.id,
+            ).order_by(Asset.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if alt:
+            alt.is_selected = True
+            await db.flush()
+
+    await db.refresh(asset)
+    return ApprovalResponse(id=str(asset.id), status=asset.status, is_selected=asset.is_selected)
+
+
+@router.post(
+    "/{project_id}/frames/{frame_id}/approve-all",
+    response_model=BulkApprovalResponse,
+)
+async def approve_all_frame_assets(
+    project_id: UUID,
+    frame_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve all ready image assets for a frame at once."""
+    result = await db.execute(
+        select(Asset).where(
+            Asset.parent_type == "frame_spec",
+            Asset.parent_id == frame_id,
+            Asset.asset_type == "image",
+            Asset.status == "ready",
+        )
+    )
+    assets = list(result.scalars().all())
+    for a in assets:
+        a.status = "approved"
+    await db.flush()
+    return BulkApprovalResponse(updated=len(assets), approved=len(assets), rejected=0)
+
+
+@router.get(
+    "/{project_id}/approval-summary",
+)
+async def approval_summary(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get approval status counts for all image assets in a project."""
+    rows = (await db.execute(
+        select(Asset.status, func.count())
+        .where(Asset.project_id == project_id, Asset.asset_type == "image")
+        .group_by(Asset.status)
+    )).all()
+    counts = {r[0]: r[1] for r in rows}
+    total = sum(counts.values())
+    approved = counts.get("approved", 0)
+    rejected = counts.get("rejected", 0)
+    ready = counts.get("ready", 0)
+    pending = counts.get("pending", 0)
+
+    return {
+        "total": total,
+        "approved": approved,
+        "rejected": rejected,
+        "ready_for_review": ready,
+        "pending": pending,
+        "all_reviewed": ready == 0 and pending == 0 and total > 0,
+        "approval_rate": round(approved / max(total, 1) * 100),
+    }
 
 
 # ── Shot variant summary ─────────────────────────────

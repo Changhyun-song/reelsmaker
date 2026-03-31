@@ -167,7 +167,7 @@ async def list_frame_assets(
     responses = []
     for a in assets:
         url = None
-        if a.storage_key and a.status == "ready":
+        if a.storage_key and a.status in ("ready", "approved"):
             try:
                 url = get_presigned_url(a.storage_key, expires_in=3600)
             except Exception:

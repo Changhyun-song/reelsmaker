@@ -41,6 +41,7 @@ import CostDashboard from "@/features/studio/CostDashboard";
 import PipelineInspector from "./pipeline-inspector";
 import GuidedWorkflow from "./guided-workflow";
 import ImageApprovalPanel from "@/features/image-approval/ImageApprovalPanel";
+import StoryboardEditor from "@/features/storyboard/StoryboardEditor";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 
@@ -3104,6 +3105,7 @@ export default function ProjectDetailPage({
     structure: isSceneJobRunning || isAnyJobRunning(["plan_scenes", "plan_shots", "plan_frames"])
       ? "in_progress" : (hasShots && hasFrames) ? "complete" : hasScenes ? "available" : hasScript ? "available" : "locked",
     style: hasScenes ? "available" : "locked",
+    storyboard: hasFrames ? "available" : hasShots ? "available" : "locked",
     images: isAnyJobRunning(["generate_image", "generate_images"])
       ? "in_progress" : hasImages ? "complete" : hasFrames ? "available" : "locked",
     videos: isAnyJobRunning(["generate_video", "generate_videos"])
@@ -3506,6 +3508,28 @@ export default function ProjectDetailPage({
             }}
           />
         </>
+      )}
+
+      {/* ═══ Storyboard ═══ */}
+      {section === "storyboard" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">스토리보드 편집기</h2>
+            <p className="text-sm text-neutral-400 mt-1">
+              컷 단위로 프롬프트, 길이, 내레이션, 대표 이미지를 수정합니다.
+            </p>
+          </div>
+          {!hasFrames ? (
+            <LockedSection message="프레임을 먼저 생성하세요. (장면 구성 → 샷 계획 → 프레임 생성)" target="structure" onNavigate={setSection} />
+          ) : (
+            <StoryboardEditor
+              projectId={projectId}
+              scenes={scenes}
+              shots={allShots}
+              frames={allFrames}
+            />
+          )}
+        </div>
       )}
 
       {/* ═══ Images (Studio) ═══ */}

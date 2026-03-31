@@ -99,6 +99,9 @@ export interface FrameData {
   forbidden_elements: string | null;
   visual_prompt: string | null;
   negative_prompt: string | null;
+  dialogue: string | null;
+  duration_ms: number;
+  transition_type: string;
   status: string;
 }
 

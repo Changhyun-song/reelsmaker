@@ -7,6 +7,7 @@ export type WorkspaceSection =
   | "script"
   | "structure"
   | "style"
+  | "storyboard"
   | "images"
   | "videos"
   | "tts-subtitle"
@@ -29,13 +30,14 @@ const WORKSPACE_STEPS: StepDef[] = [
   { key: "script", label: "① 대본 생성", icon: "✎", group: "기획 단계" },
   { key: "structure", label: "② 구조 분해", icon: "▦", group: "기획 단계" },
   { key: "style", label: "③ 스타일 설정", icon: "◈", group: "기획 단계" },
-  { key: "images", label: "④ 이미지 생성", icon: "◻", group: "생성 단계" },
-  { key: "videos", label: "⑤ 비디오 생성", icon: "▶", group: "생성 단계" },
-  { key: "tts-subtitle", label: "⑥ TTS · 자막", icon: "♫", group: "생성 단계" },
-  { key: "timeline", label: "⑦ 타임라인", icon: "≡", group: "합성 단계" },
-  { key: "render", label: "⑧ 렌더", icon: "◎", group: "합성 단계" },
-  { key: "qa", label: "⑨ 품질 검수", icon: "✓", group: "마무리" },
-  { key: "export", label: "⑩ 내보내기", icon: "↗", group: "마무리" },
+  { key: "storyboard", label: "④ 스토리보드", icon: "▤", group: "기획 단계" },
+  { key: "images", label: "⑤ 이미지 생성", icon: "◻", group: "생성 단계" },
+  { key: "videos", label: "⑥ 비디오 생성", icon: "▶", group: "생성 단계" },
+  { key: "tts-subtitle", label: "⑦ TTS · 자막", icon: "♫", group: "생성 단계" },
+  { key: "timeline", label: "⑧ 타임라인", icon: "≡", group: "합성 단계" },
+  { key: "render", label: "⑨ 렌더", icon: "◎", group: "합성 단계" },
+  { key: "qa", label: "⑩ 품질 검수", icon: "✓", group: "마무리" },
+  { key: "export", label: "⑪ 내보내기", icon: "↗", group: "마무리" },
 ];
 
 export { WORKSPACE_STEPS };

@@ -23,6 +23,7 @@ class FrameSpecResponse(BaseModel):
     forbidden_elements: str | None
     visual_prompt: str | None
     negative_prompt: str | None
+    dialogue: str | None = None
     duration_ms: int
     transition_type: str
     status: str

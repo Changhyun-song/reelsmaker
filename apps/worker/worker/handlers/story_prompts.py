@@ -173,6 +173,25 @@ async def handle_story_prompts(job_id: str, **params) -> dict:
     story_parts.append(f"Resolution: {project.width or 1080}x{project.height or 1920}")
     story_parts.append("")
 
+    # Inject Continuity Bible if available
+    bible = (project.settings or {}).get("bible")
+    if bible and any(bible.values()):
+        story_parts.append("## CONTINUITY BIBLE (must be respected in ALL frames)")
+        for key, label in [
+            ("main_subject_identity", "Main Subject Identity"),
+            ("character_visual_rules", "Character Visual Rules"),
+            ("wardrobe_rules", "Wardrobe Rules"),
+            ("palette_rules", "Color Palette Rules"),
+            ("lighting_rules", "Lighting Rules"),
+            ("lens_rules", "Lens / Camera Rules"),
+            ("environment_consistency_rules", "Environment Consistency"),
+            ("forbidden_drift_rules", "Forbidden Drift (NEVER change these)"),
+        ]:
+            val = bible.get(key, "")
+            if val:
+                story_parts.append(f"- {label}: {val}")
+        story_parts.append("")
+
     if script.narration_draft:
         story_parts.append(f"## FULL NARRATION\n{script.narration_draft}")
         story_parts.append("")

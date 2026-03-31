@@ -232,7 +232,7 @@ def _build_motion_sentence(
 
 def compile_continuity_block(ctx: CompilerContext) -> str:
     """Build a continuity enforcement string from style anchors, character locks,
-    and the project-level ContinuityProfile."""
+    the project-level ContinuityProfile, and the Continuity Bible."""
     if not ctx.continuity.enabled:
         return ""
 
@@ -240,12 +240,19 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     cont = ctx.continuity
     style = ctx.style
 
+    # Bible: main subject identity (highest priority anchor)
+    if cont.main_subject_identity:
+        parts.append(f"SUBJECT IDENTITY: {cont.main_subject_identity}")
+
     anchor = style.style_anchor or cont.style_anchor_summary
     if anchor:
         parts.append(f"STYLE ANCHOR: {anchor}")
 
+    # Bible: palette rules (override color lock)
     color_parts: list[str] = []
-    if cont.color_palette_lock:
+    if cont.palette_rules:
+        color_parts.append(cont.palette_rules)
+    elif cont.color_palette_lock:
         color_parts.append(cont.color_palette_lock)
     elif style.color_palette:
         color_parts.append(style.color_palette)
@@ -260,6 +267,10 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     if light:
         parts.append(f"LIGHTING BASELINE: {light}")
 
+    # Bible: lens rules
+    if cont.lens_rules:
+        parts.append(f"LENS RULES: {cont.lens_rules}")
+
     tex_parts = [p for p in [style.texture_quality, style.depth_style] if p]
     if tex_parts:
         parts.append(f"SURFACE: {', '.join(tex_parts)}")
@@ -268,9 +279,14 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     if env:
         parts.append(f"ENVIRONMENT RULES: {env}")
 
+    # Bible: character visual rules + wardrobe rules
     char_locks: list[str] = []
-    if cont.character_lock_notes:
+    if cont.character_visual_rules:
+        char_locks.append(cont.character_visual_rules)
+    elif cont.character_lock_notes:
         char_locks.append(cont.character_lock_notes)
+    if cont.wardrobe_rules:
+        char_locks.append(f"WARDROBE: {cont.wardrobe_rules}")
     for c in ctx.characters:
         lock_parts: list[str] = []
         if c.forbidden_drift:
@@ -287,6 +303,10 @@ def compile_continuity_block(ctx: CompilerContext) -> str:
     if cont.temporal_rules:
         parts.append(f"TEMPORAL: {cont.temporal_rules}")
 
+    # Bible: forbidden drift rules (extend existing)
+    if cont.forbidden_drift_rules and cont.forbidden_drift_rules != cont.forbidden_global_drift:
+        parts.append(f"FORBIDDEN DRIFT: {cont.forbidden_drift_rules}")
+
     return " || ".join(parts) if parts else ""
 
 
@@ -298,6 +318,8 @@ def _build_continuity_negative(ctx: CompilerContext) -> list[str]:
         return items
     if cont.forbidden_global_drift:
         items.append(cont.forbidden_global_drift.strip())
+    if cont.forbidden_drift_rules and cont.forbidden_drift_rules != cont.forbidden_global_drift:
+        items.append(cont.forbidden_drift_rules.strip())
     for c in ctx.characters:
         if c.forbidden_drift:
             items.append(c.forbidden_drift.strip())

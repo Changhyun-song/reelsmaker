@@ -51,7 +51,7 @@ class CharacterContext(BaseModel):
 
 
 class ContinuityContext(BaseModel):
-    """Extracted from ContinuityProfile — project-level consistency rules."""
+    """Extracted from ContinuityProfile — project-level consistency rules (Continuity Bible)."""
     enabled: bool = True
     color_palette_lock: str = ""
     lighting_anchor: str = ""
@@ -61,6 +61,13 @@ class ContinuityContext(BaseModel):
     character_lock_notes: str = ""
     forbidden_global_drift: str = ""
     temporal_rules: str = ""
+    # Continuity Bible extensions (stored in project.settings["bible"])
+    main_subject_identity: str = ""
+    character_visual_rules: str = ""
+    wardrobe_rules: str = ""
+    palette_rules: str = ""
+    lens_rules: str = ""
+    forbidden_drift_rules: str = ""
 
 
 class SceneContext(BaseModel):

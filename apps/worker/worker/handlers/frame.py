@@ -262,10 +262,12 @@ async def handle_frame_plan(job_id: str, **params) -> dict:
 
     schema_hint = json.dumps(schema_example, ensure_ascii=False, indent=2)
 
+    bible = (project.settings or {}).get("bible") if project else None
     continuity_block = build_continuity_text_block(
         project.active_style_preset if project else None,
         characters,
         continuity,
+        bible,
     )
 
     camera_motion = shot.camera_movement or "static"

@@ -177,10 +177,12 @@ async def handle_shot_plan(job_id: str, **params) -> dict:
             )
         ).scalar_one_or_none()
 
+    bible = (project.settings or {}).get("bible") if project else None
     continuity_block = build_continuity_text_block(
         project.active_style_preset if project else None,
         characters,
         continuity,
+        bible,
     )
 
     scene_duration = scene.duration_estimate_sec or 15

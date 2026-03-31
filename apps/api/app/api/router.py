@@ -1,5 +1,5 @@
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,71 @@ api_router.include_router(qa_router, prefix="/projects", tags=["qa"])
 api_router.include_router(exports_router, prefix="/projects", tags=["export"])
 api_router.include_router(evaluations_router, prefix="/projects", tags=["evaluations"])
 api_router.include_router(continuity_router, prefix="/projects", tags=["continuity"])
+
+
+# ── Continuity Bible CRUD (stored in project.settings.bible) ──
+
+
+@api_router.get("/projects/{project_id}/bible", tags=["projects"])
+async def get_bible(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    """Get the Continuity Bible for a project."""
+    from shared.models.project import Project
+    from sqlalchemy import select as sel
+    project = (await db.execute(sel(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    bible = (project.settings or {}).get("bible", {})
+    return {
+        "project_id": project_id,
+        "bible": bible,
+        "fields": [
+            {"key": "main_subject_identity", "label": "주인공/주체 정체성", "hint": "전체 영상에 등장하는 주요 인물이나 대상의 시각적 특징"},
+            {"key": "character_visual_rules", "label": "캐릭터 시각 규칙", "hint": "캐릭터 외형이 씬마다 흔들리지 않도록 고정할 규칙"},
+            {"key": "wardrobe_rules", "label": "의상/소품 규칙", "hint": "의상, 액세서리, 소품이 씬마다 달라지지 않도록 고정"},
+            {"key": "palette_rules", "label": "색감/팔레트 규칙", "hint": "전체 영상의 색감 톤, 주요 컬러 팔레트"},
+            {"key": "lighting_rules", "label": "조명 규칙", "hint": "조명 방향, 색온도, 질감이 일관되도록"},
+            {"key": "lens_rules", "label": "렌즈/카메라 톤", "hint": "렌즈 느낌, 피사계심도, 카메라 스타일"},
+            {"key": "environment_consistency_rules", "label": "환경 일관성", "hint": "배경, 장소, 날씨, 시간대가 씬 간 일관되도록"},
+            {"key": "forbidden_drift_rules", "label": "변하면 안 되는 것", "hint": "절대 변하면 안 되는 요소 (예: 캐릭터 머리색, 시간대)"},
+        ],
+    }
+
+
+@api_router.put("/projects/{project_id}/bible", tags=["projects"])
+async def update_bible(
+    project_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    """Update the Continuity Bible for a project."""
+    from shared.models.project import Project
+    from sqlalchemy import select as sel
+    project = (await db.execute(sel(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    allowed_keys = {
+        "main_subject_identity", "character_visual_rules", "wardrobe_rules",
+        "palette_rules", "lighting_rules", "lens_rules",
+        "environment_consistency_rules", "forbidden_drift_rules",
+    }
+    bible_data = {k: v for k, v in body.get("bible", body).items() if k in allowed_keys}
+
+    settings = dict(project.settings or {})
+    settings["bible"] = bible_data
+    project.settings = settings
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(project, "settings")
+    await db.flush()
+    await db.refresh(project)
+
+    return {"project_id": project_id, "bible": bible_data, "saved": True}
 
 
 @api_router.get("/projects/{project_id}/progress", tags=["projects"])

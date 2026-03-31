@@ -71,10 +71,14 @@ def char_to_ctx(c: CharacterProfile) -> CharacterContext:
     )
 
 
-def continuity_to_ctx(cp: ContinuityProfile | None) -> ContinuityContext:
-    if cp is None:
+def continuity_to_ctx(
+    cp: ContinuityProfile | None,
+    bible: dict | None = None,
+) -> ContinuityContext:
+    if cp is None and not bible:
         return ContinuityContext(enabled=False)
-    return ContinuityContext(
+    b = bible or {}
+    base = ContinuityContext(enabled=False) if cp is None else ContinuityContext(
         enabled=cp.enabled,
         color_palette_lock=cp.color_palette_lock or "",
         lighting_anchor=cp.lighting_anchor or "",
@@ -85,6 +89,19 @@ def continuity_to_ctx(cp: ContinuityProfile | None) -> ContinuityContext:
         forbidden_global_drift=cp.forbidden_global_drift or "",
         temporal_rules=cp.temporal_rules or "",
     )
+    if b:
+        base.enabled = True
+        base.main_subject_identity = b.get("main_subject_identity", "")
+        base.character_visual_rules = b.get("character_visual_rules", "")
+        base.wardrobe_rules = b.get("wardrobe_rules", "")
+        base.palette_rules = b.get("palette_rules", base.color_palette_lock)
+        base.lens_rules = b.get("lens_rules", "")
+        base.forbidden_drift_rules = b.get("forbidden_drift_rules", base.forbidden_global_drift)
+        if b.get("lighting_rules"):
+            base.lighting_anchor = base.lighting_anchor or b["lighting_rules"]
+        if b.get("environment_consistency_rules"):
+            base.environment_consistency = base.environment_consistency or b["environment_consistency_rules"]
+    return base
 
 
 def scene_to_ctx(sc: Scene) -> SceneContext:
@@ -171,7 +188,8 @@ async def _load_project_context(
         )
     ).scalar_one_or_none()
 
-    return project, characters, continuity
+    bible = (project.settings or {}).get("bible")
+    return project, characters, continuity, bible
 
 
 async def build_compiler_context(
@@ -199,12 +217,12 @@ async def build_compiler_context(
     if not scene:
         raise ValueError(f"Scene {shot.scene_id} not found")
 
-    project, characters, continuity = await _load_project_context(project_id, db)
+    project, characters, continuity, bible = await _load_project_context(project_id, db)
 
     return CompilerContext(
         project=project_to_ctx(project),
         style=style_to_ctx(project.active_style_preset),
-        continuity=continuity_to_ctx(continuity),
+        continuity=continuity_to_ctx(continuity, bible),
         characters=[char_to_ctx(c) for c in characters],
         scene=scene_to_ctx(scene),
         shot=shot_to_ctx(shot),
@@ -231,7 +249,7 @@ async def build_shot_compiler_context(
     if not scene:
         raise ValueError(f"Scene {shot.scene_id} not found")
 
-    project, characters, continuity = await _load_project_context(project_id, db)
+    project, characters, continuity, bible = await _load_project_context(project_id, db)
 
     start_frame = (
         await db.execute(
@@ -247,7 +265,7 @@ async def build_shot_compiler_context(
     return CompilerContext(
         project=project_to_ctx(project),
         style=style_to_ctx(project.active_style_preset),
-        continuity=continuity_to_ctx(continuity),
+        continuity=continuity_to_ctx(continuity, bible),
         characters=[char_to_ctx(c) for c in characters],
         scene=scene_to_ctx(scene),
         shot=shot_to_ctx(shot),
@@ -259,10 +277,27 @@ def build_continuity_text_block(
     style: StylePreset | None,
     characters: list[CharacterProfile],
     continuity: ContinuityProfile | None,
+    bible: dict | None = None,
 ) -> str:
     """Build a plain-text continuity context block for injection into AI planner
     prompts (shot/frame planners). No CompilerContext needed — works from ORM models."""
     lines: list[str] = []
+
+    # Continuity Bible (highest priority — user-edited global rules)
+    if bible and any(bible.values()):
+        for key, label in [
+            ("main_subject_identity", "SUBJECT IDENTITY"),
+            ("character_visual_rules", "CHARACTER VISUAL RULES"),
+            ("wardrobe_rules", "WARDROBE RULES"),
+            ("palette_rules", "PALETTE RULES"),
+            ("lighting_rules", "LIGHTING RULES"),
+            ("lens_rules", "LENS RULES"),
+            ("environment_consistency_rules", "ENVIRONMENT CONSISTENCY"),
+            ("forbidden_drift_rules", "FORBIDDEN DRIFT"),
+        ]:
+            val = bible.get(key, "")
+            if val:
+                lines.append(f"{label}: {val}")
 
     # Style anchor
     if style:

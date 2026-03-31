@@ -104,6 +104,207 @@ const GENRES: GenreOption[] = [
     defaults: { rendering: "cinematic_realism", camera: "cinematic anamorphic 2.39:1", lighting: "motivated source lighting", color: "film LUT orange-teal" } },
 ];
 
+/* ═══════════════════════════════════════════════════════
+   Starter Templates — one-click full presets per genre
+   ═══════════════════════════════════════════════════════ */
+
+interface StarterTemplate {
+  id: string;
+  genreId: string;
+  name: string;
+  tagline: string;
+  icon: string;
+  gradient: string;
+  useCases: string[];
+  preset: Record<string, string>;
+  bible: Record<string, string>;
+  shotRhythm: { avgDurationSec: number; cutsPerMinute: number; keyFrameRatio: number };
+  characterConsistency: "low" | "medium" | "high";
+}
+
+const STARTER_TEMPLATES: StarterTemplate[] = [
+  {
+    id: "cinematic_story",
+    genreId: "longform",
+    name: "Cinematic Story",
+    tagline: "영화적 톤의 스토리텔링 롱폼 콘텐츠",
+    icon: "📹",
+    gradient: "from-amber-900/40 via-orange-900/20 to-neutral-900",
+    useCases: ["유튜브 에세이", "지식/정보 콘텐츠", "브이로그 하이라이트"],
+    preset: {
+      name: "Cinematic Story",
+      description: "유튜브/소셜 미디어용 시네마틱 스토리텔링 프리셋",
+      rendering_style: "cinematic_realism",
+      style_keywords: "photorealistic, cinematic color grading, film grain, shallow depth of field, professional lighting",
+      color_palette: "warm amber highlights, deep shadow blues, balanced skin tones, subtle orange-teal split",
+      color_temperature: "4200K neutral warm",
+      camera_language: "dynamic mixed: wide establishing → medium narration → close-up detail, motivated camera movement, 24fps cinematic cadence",
+      lighting_rules: "natural key from 45° left, soft ambient fill, warm practical sources, golden hour preference for outdoor",
+      texture_quality: "photorealistic 4K, subtle film grain ISO 400",
+      depth_style: "shallow DOF f/2.8 for portraits, deep f/8 for landscapes",
+      environment_rules: "realistic modern settings, clean composition, leading lines toward subject",
+      negative_rules: "no cartoon style, no oversaturated neon, no dutch angle unless motivated, no lens flare abuse",
+      negative_prompt: "text, watermark, blurry, low quality, cartoon, anime, oversaturated, fish-eye distortion",
+      style_anchor: "Cinematic photorealistic storytelling with warm amber tones, professional 3-point lighting, and shallow depth of field. Film-like color grading with subtle grain.",
+      prompt_prefix: "cinematic photorealistic scene, 4K, professional color grading,",
+    },
+    bible: {
+      main_subject_identity: "Maintain consistent subject appearance across all cuts",
+      palette_rules: "Warm amber highlights + cool blue shadows. Skin tones: natural warm. Accent: subtle orange-teal split-toning",
+      lens_rules: "35mm-85mm range. Shallow DOF f/2.8 for subjects, deep f/8 for establishing shots. No fisheye or extreme wide.",
+      character_visual_rules: "Subject maintains same clothing, hair, and physical features throughout. No age/build drift.",
+      wardrobe_rules: "Consistent outfit per sequence. No unexplained costume changes between consecutive cuts.",
+      forbidden_drift_rules: "No cartoon/anime style shift. No drastic color temperature jump. No sudden aspect ratio change.",
+    },
+    shotRhythm: { avgDurationSec: 4.0, cutsPerMinute: 12, keyFrameRatio: 0.25 },
+    characterConsistency: "medium",
+  },
+  {
+    id: "warm_food_commercial",
+    genreId: "restaurant",
+    name: "Warm Food Commercial",
+    tagline: "식욕을 자극하는 따뜻한 푸드 광고 톤",
+    icon: "🍽",
+    gradient: "from-orange-900/40 via-amber-900/20 to-neutral-900",
+    useCases: ["맛집 소개", "레시피 영상", "카페/베이커리 홍보"],
+    preset: {
+      name: "Warm Food Commercial",
+      description: "음식을 가장 맛있게 보이게 하는 따뜻한 광고 프리셋",
+      rendering_style: "premium_commercial",
+      style_keywords: "food photography, warm golden light, steam detail, appetizing colors, close-up textures, bokeh background",
+      color_palette: "rich amber, golden honey, warm cream, deep chocolate brown, fresh green accent",
+      color_temperature: "3200K warm golden",
+      camera_language: "macro close-up food detail 100mm f/2.8, wide interior 24mm establishing, overhead flat-lay, slow dolly reveal",
+      lighting_rules: "warm key light from back-left for steam glow, soft fill from right, rim light on food edges for texture, warm practical candles/pendants",
+      texture_quality: "8K sharp detail on food surfaces, visible texture and moisture",
+      depth_style: "very shallow f/1.8-2.8 for hero food shots, moderate f/4 for interior ambiance",
+      environment_rules: "clean table surfaces, natural wood/marble materials, warm ambient interior, soft background blur with bokeh lights",
+      negative_rules: "no cold blue lighting on food, no harsh shadows on plates, no messy background, no fluorescent green tint",
+      negative_prompt: "cold lighting, blue tint, messy background, blurry food, plastic appearance, cartoon, text overlay",
+      style_anchor: "Warm golden food photography with appetizing close-up textures. Rich amber tones, steam highlights, and shallow bokeh. Premium restaurant commercial quality.",
+      prompt_prefix: "appetizing food photography, warm golden light, close-up detail, professional food styling,",
+    },
+    bible: {
+      main_subject_identity: "Food items maintain consistent plating and garnish across cuts",
+      palette_rules: "Rich golden amber dominant. Food colors: saturated natural (no artificial enhancement). Background: warm neutral cream/wood.",
+      lens_rules: "100mm macro for hero shots, 50mm for medium, 24mm wide for interiors. Always shallow DOF on food.",
+      character_visual_rules: "If people appear: consistent server/chef outfit. Food: same plate arrangement throughout sequence.",
+      wardrobe_rules: "Staff in consistent uniform. Table settings identical across cuts.",
+      forbidden_drift_rules: "No cold blue/green color shift on food. No cartoon rendering. No harsh directional shadow on plates.",
+    },
+    shotRhythm: { avgDurationSec: 3.0, cutsPerMinute: 15, keyFrameRatio: 0.30 },
+    characterConsistency: "low",
+  },
+  {
+    id: "premium_product_ad",
+    genreId: "product",
+    name: "Premium Product Ad",
+    tagline: "고급 브랜드 제품 촬영 룩",
+    icon: "📦",
+    gradient: "from-cyan-900/40 via-slate-900/20 to-neutral-900",
+    useCases: ["제품 런칭", "브랜드 캠페인", "전자기기 리뷰"],
+    preset: {
+      name: "Premium Product Ad",
+      description: "하이엔드 제품 광고용 클린 스튜디오 프리셋",
+      rendering_style: "premium_commercial",
+      style_keywords: "product photography, studio lighting, clean background, reflective surfaces, 8K macro detail, luxury feel",
+      color_palette: "clean white, brushed silver, deep black, brand-accent color, subtle gradient",
+      color_temperature: "5600K daylight neutral",
+      camera_language: "studio macro 105mm product detail, 360 orbit rotation, slow dolly push-in, top-down flat lay, lifestyle context 35mm",
+      lighting_rules: "3-point studio softbox: large key left, fill right, hair/rim from behind. Gradient background. Product reflection control.",
+      texture_quality: "8K ultra-sharp, visible material texture, clean edges, reflection detail",
+      depth_style: "moderate f/4 for full product, shallow f/2.0 for detail macro, deep f/11 for flat-lay",
+      environment_rules: "clean minimal studio, gradient backdrop, floating/pedestal display, lifestyle scenes with modern interior",
+      negative_rules: "no dust/fingerprints, no harsh shadow, no cluttered background, no warm tint on white products",
+      negative_prompt: "dirty surface, fingerprints, cluttered background, low quality, blurry, warm tint on product, text overlay",
+      style_anchor: "Premium studio product photography. Clean neutral lighting, razor-sharp macro detail, luxury material textures. Apple-commercial level production quality.",
+      prompt_prefix: "premium product photography, studio lighting, clean background, razor-sharp detail,",
+    },
+    bible: {
+      main_subject_identity: "Product maintains exact same model/color/finish across all cuts",
+      palette_rules: "Clean neutral white dominant. Product color: accurate brand color. Accent: brand identity color only.",
+      lens_rules: "105mm macro for detail, 50mm for full product, 35mm for lifestyle. No distortion on product edges.",
+      character_visual_rules: "Product: same angle-consistent design. Hands (if shown): clean, groomed, neutral skin tone.",
+      wardrobe_rules: "Minimal human presence. If hands appear: same clean style throughout.",
+      forbidden_drift_rules: "No product color deviation. No background clutter. No warm/cool temperature drift. No style shift to cartoon.",
+    },
+    shotRhythm: { avgDurationSec: 3.5, cutsPerMinute: 14, keyFrameRatio: 0.35 },
+    characterConsistency: "high",
+  },
+  {
+    id: "polished_social_character",
+    genreId: "influencer",
+    name: "Polished Social Character",
+    tagline: "매끈한 가상 인플루언서 룩",
+    icon: "🤳",
+    gradient: "from-pink-900/40 via-violet-900/20 to-neutral-900",
+    useCases: ["AI 인플루언서 콘텐츠", "가상 캐릭터 소셜", "패션/뷰티 룩북"],
+    preset: {
+      name: "Polished Social Character",
+      description: "가상 인물 기반 소셜 미디어 콘텐츠용 프리셋",
+      rendering_style: "stylized_animation",
+      style_keywords: "stylized realism, beauty lighting, flawless skin, vibrant but natural colors, social media aesthetic, portrait bokeh",
+      color_palette: "soft pink highlights, clean warm skin tones, pastel accent, creamy background, subtle peach glow",
+      color_temperature: "3800K warm beauty",
+      camera_language: "portrait 85mm f/1.4 headshot, medium 50mm waist-up, selfie-angle POV, gentle parallax",
+      lighting_rules: "beauty ring light front-fill, soft key from 45° right, hair light from behind, catchlights in eyes mandatory",
+      texture_quality: "smooth skin rendering, detailed hair/clothing textures, clean edge anti-aliasing",
+      depth_style: "very shallow f/1.4-1.8 for portraits, creamy circular bokeh background",
+      environment_rules: "clean modern interior, café/lifestyle backdrop, soft natural daylight from window, minimal props",
+      negative_rules: "no aging, no blemish, no harsh shadow, no unflattering angle, no desaturated skin",
+      negative_prompt: "wrinkles, blemish, harsh shadow, unflattering angle, bad anatomy, extra fingers, ugly, deformed face",
+      style_anchor: "Polished beauty-lit social media character. Flawless skin rendering, warm pastel tones, 85mm portrait bokeh. Consistent virtual influencer identity across all cuts.",
+      prompt_prefix: "beautiful social media portrait, beauty lighting, flawless skin, 85mm bokeh,",
+    },
+    bible: {
+      main_subject_identity: "Virtual character maintains exact same face, hair, body proportions in every frame",
+      palette_rules: "Warm skin-tone optimized. Pastel pink/peach highlights. Clean neutral background. No cold desaturation.",
+      lens_rules: "85mm f/1.4 for close-up, 50mm f/1.8 for medium. Always shallow DOF. Catchlights in eyes.",
+      character_visual_rules: "Same face structure, eye color, hair style/color, skin tone. No drift in age, weight, or ethnicity.",
+      wardrobe_rules: "Outfit consistent per video segment. Style: modern casual/fashion. Signature accessories maintained.",
+      forbidden_drift_rules: "No face shape change. No skin tone shift. No age progression. No style shift to cartoon/anime unless intended.",
+    },
+    shotRhythm: { avgDurationSec: 3.0, cutsPerMinute: 15, keyFrameRatio: 0.40 },
+    characterConsistency: "high",
+  },
+  {
+    id: "moody_dramatic_film",
+    genreId: "drama",
+    name: "Moody Dramatic Film",
+    tagline: "무디한 드라마/단편 영화 톤",
+    icon: "🎬",
+    gradient: "from-blue-900/40 via-indigo-900/20 to-neutral-900",
+    useCases: ["단편 영화", "뮤직비디오", "감성 스토리"],
+    preset: {
+      name: "Moody Dramatic Film",
+      description: "분위기 있는 드라마/단편 영화용 프리셋",
+      rendering_style: "cinematic_realism",
+      style_keywords: "cinematic anamorphic, moody atmospheric, motivated lighting, film noir influence, desaturated earth tones, dramatic contrast",
+      color_palette: "desaturated earth tones, deep navy shadow, warm amber practicals, cool steel blue moonlight, skin: muted warm",
+      color_temperature: "3600K tungsten warm key, 6500K cool fill",
+      camera_language: "anamorphic 2.39:1, slow deliberate tracking, push-in for emotional peak, handheld tension, rack focus subject isolation",
+      lighting_rules: "motivated source only: window light, practicals, streetlamps. Deep shadow ratio 4:1. Rim light for subject separation. No flat frontlight.",
+      texture_quality: "filmic grain ISO 800, subtle lens aberration, organic texture",
+      depth_style: "anamorphic oval bokeh f/2.0, rack focus between subjects, deep staging for blocking",
+      environment_rules: "atmospheric haze/fog, practical light sources visible in frame, wet surfaces for reflection, moody interiors",
+      negative_rules: "no flat lighting, no bright cheerful palette, no handheld shake without motivation, no modern pop-color accents",
+      negative_prompt: "bright cheerful, oversaturated, cartoon, flat lighting, text overlay, lens flare, clean sterile environment",
+      style_anchor: "Moody cinematic drama with anamorphic framing, motivated lighting, and desaturated earth tones. Film noir influence with deep shadows and atmospheric haze. Theatrical staging.",
+      prompt_prefix: "cinematic dramatic scene, anamorphic 2.39:1, moody atmospheric lighting, filmic grain,",
+    },
+    bible: {
+      main_subject_identity: "Characters maintain exact appearance: costume, hair, makeup, physical build across all scenes",
+      palette_rules: "Desaturated earth tones dominant. Shadows: deep navy/steel blue. Highlights: warm amber from practicals. Skin: muted natural warm.",
+      lens_rules: "Anamorphic 40-75mm. Oval bokeh. Rack focus for emphasis. Slow dolly/track only. No zoom. No steadicam unless motivated.",
+      character_visual_rules: "Same costume per scene/sequence. Makeup continuity. Physical state continuity (injuries, fatigue).",
+      wardrobe_rules: "Costume changes only at scene/time boundaries. Consistent weathering/aging of clothing.",
+      forbidden_drift_rules: "No bright cheerful palette shift. No cartoon/anime style. No flat lighting. No breaking of light motivation.",
+    },
+    shotRhythm: { avgDurationSec: 5.0, cutsPerMinute: 8, keyFrameRatio: 0.20 },
+    characterConsistency: "high",
+  },
+];
+
 interface VisualLookOption {
   id: string;
   label: string;
@@ -177,14 +378,16 @@ interface WizardState {
   tones: Record<string, string>;
 }
 
-function StyleWizard({ onApply, current }: {
+function StyleWizard({ onApply, onApplyStarter, current }: {
   onApply: (state: WizardState, presetData: Record<string, string>) => void;
+  onApplyStarter: (template: StarterTemplate) => void;
   current: WizardState;
 }) {
   const [genre, setGenre] = useState(current.genre);
   const [look, setLook] = useState(current.visualLook);
   const [tones, setTones] = useState<Record<string, string>>(current.tones);
   const [step, setStep] = useState(1);
+  const [starterPreview, setStarterPreview] = useState<string | null>(null);
 
   const genreDef = GENRES.find(g => g.id === genre);
   const lookDef = VISUAL_LOOKS.find(l => l.id === look);
@@ -258,26 +461,122 @@ function StyleWizard({ onApply, current }: {
         ))}
       </div>
 
-      {/* Step 1: Genre */}
+      {/* Step 1: Genre + Starter Templates */}
       {step === 1 ? (
-        <div className="space-y-3">
-          <p className="text-sm text-neutral-400">어떤 영상을 만드시나요?</p>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {GENRES.map(g => (
-              <button
-                key={g.id}
-                onClick={() => { setGenre(g.id); setStep(2); }}
-                className={`rounded-xl border p-4 text-left transition-all ${
-                  genre === g.id
-                    ? "border-blue-600 bg-blue-950/20 ring-1 ring-blue-500/20"
-                    : "border-neutral-800 bg-neutral-900/50 hover:border-neutral-700"
-                }`}
-              >
-                <span className="text-2xl">{g.icon}</span>
-                <p className="text-sm font-bold text-neutral-200 mt-2">{g.label}</p>
-                <p className="text-[10px] text-neutral-500 mt-1">{g.desc}</p>
-              </button>
-            ))}
+        <div className="space-y-5">
+          {/* Starter templates — quick start */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-bold text-neutral-300">원클릭 스타터 템플릿</p>
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-900/30 text-emerald-400 font-medium border border-emerald-800/30">추천</span>
+            </div>
+            <p className="text-[10px] text-neutral-500">
+              장르에 최적화된 완성형 템플릿입니다. 클릭 한 번으로 스타일·색감·조명·카메라·Continuity 규칙이 모두 설정됩니다.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {STARTER_TEMPLATES.map(t => {
+                const isPreview = starterPreview === t.id;
+                return (
+                  <div key={t.id} className={`rounded-xl border overflow-hidden transition-all ${
+                    isPreview ? "border-blue-600 ring-1 ring-blue-500/20" : "border-neutral-800 hover:border-neutral-700"
+                  }`}>
+                    {/* Gradient header */}
+                    <div className={`h-20 bg-gradient-to-br ${t.gradient} relative p-3 flex flex-col justify-end`}>
+                      <span className="absolute top-2 right-2 text-2xl">{t.icon}</span>
+                      <p className="text-sm font-bold text-white drop-shadow-lg">{t.name}</p>
+                      <p className="text-[10px] text-white/70">{t.tagline}</p>
+                    </div>
+
+                    <div className="p-3 space-y-2">
+                      {/* Use cases */}
+                      <div className="flex flex-wrap gap-1">
+                        {t.useCases.map(u => (
+                          <span key={u} className="text-[8px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400">{u}</span>
+                        ))}
+                      </div>
+
+                      {/* Key specs */}
+                      <div className="grid grid-cols-3 gap-1 text-[8px]">
+                        <div className="rounded bg-neutral-800/50 px-1.5 py-1 text-center">
+                          <p className="text-neutral-600">색감</p>
+                          <p className="text-neutral-400 font-medium">{t.preset.color_temperature || "자동"}</p>
+                        </div>
+                        <div className="rounded bg-neutral-800/50 px-1.5 py-1 text-center">
+                          <p className="text-neutral-600">컷 리듬</p>
+                          <p className="text-neutral-400 font-medium">{t.shotRhythm.cutsPerMinute}컷/분</p>
+                        </div>
+                        <div className="rounded bg-neutral-800/50 px-1.5 py-1 text-center">
+                          <p className="text-neutral-600">캐릭터 고정</p>
+                          <p className={`font-medium ${t.characterConsistency === "high" ? "text-emerald-400" : t.characterConsistency === "medium" ? "text-amber-400" : "text-neutral-500"}`}>
+                            {t.characterConsistency === "high" ? "강함" : t.characterConsistency === "medium" ? "보통" : "약함"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Preview toggle */}
+                      {isPreview ? (
+                        <div className="rounded-lg bg-emerald-950/10 border border-emerald-800/20 p-2.5 space-y-1.5">
+                          <p className="text-[9px] font-bold text-emerald-400">이 템플릿이 설정하는 항목</p>
+                          <div className="text-[9px] space-y-0.5">
+                            <p className="text-neutral-400"><span className="text-emerald-500">✓</span> 조명: {t.preset.lighting_rules?.slice(0, 60)}...</p>
+                            <p className="text-neutral-400"><span className="text-emerald-500">✓</span> 카메라: {t.preset.camera_language?.slice(0, 60)}...</p>
+                            <p className="text-neutral-400"><span className="text-emerald-500">✓</span> Continuity Bible {Object.keys(t.bible).length}개 규칙 자동 설정</p>
+                            <p className="text-neutral-400"><span className="text-emerald-500">✓</span> 네거티브 프롬프트 포함</p>
+                            <p className="text-neutral-400"><span className="text-emerald-500">✓</span> 평균 {t.shotRhythm.avgDurationSec}초/컷, 핵심 프레임 {Math.round(t.shotRhythm.keyFrameRatio * 100)}%</p>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Actions */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => onApplyStarter(t)}
+                          className="flex-1 rounded-lg bg-blue-600 py-2 text-[11px] font-medium text-white hover:bg-blue-500 transition"
+                        >
+                          이 템플릿 적용
+                        </button>
+                        <button
+                          onClick={() => setStarterPreview(isPreview ? null : t.id)}
+                          className="rounded-lg bg-neutral-800 border border-neutral-700/50 px-3 py-2 text-[11px] font-medium text-neutral-400 hover:text-neutral-200 transition"
+                        >
+                          {isPreview ? "닫기" : "상세"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 border-t border-neutral-800" />
+            <span className="text-[10px] text-neutral-600 font-medium">또는 직접 선택</span>
+            <div className="flex-1 border-t border-neutral-800" />
+          </div>
+
+          {/* Manual genre selection */}
+          <div className="space-y-2">
+            <p className="text-sm text-neutral-400">장르를 직접 선택하고 단계별로 설정하기</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {GENRES.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => { setGenre(g.id); setStep(2); }}
+                  className={`rounded-xl border p-4 text-left transition-all ${
+                    genre === g.id
+                      ? "border-blue-600 bg-blue-950/20 ring-1 ring-blue-500/20"
+                      : "border-neutral-800 bg-neutral-900/50 hover:border-neutral-700"
+                  }`}
+                >
+                  <span className="text-2xl">{g.icon}</span>
+                  <p className="text-sm font-bold text-neutral-200 mt-2">{g.label}</p>
+                  <p className="text-[10px] text-neutral-500 mt-1">{g.desc}</p>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       ) : null}
@@ -872,6 +1171,36 @@ export default function StyleCharacterPanel({
     saveStyle(presetData);
   };
 
+  const handleStarterApply = async (template: StarterTemplate) => {
+    setSaving(true);
+    try {
+      const presetUrl = `/api/projects/${projectId}/styles`;
+      const r = await fetch(apiUrl(presetUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(template.preset),
+      });
+      if (r.ok) {
+        const saved = await r.json();
+        await fetchPresets();
+        if (saved.id) {
+          await fetch(apiUrl(`/api/projects/${projectId}/active-style/${saved.id}`), { method: "POST" });
+          onActiveStyleChange(saved.id);
+        }
+      }
+      if (Object.keys(template.bible).length > 0) {
+        await fetch(apiUrl(`/api/projects/${projectId}/bible`), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bible: template.bible }),
+        });
+      }
+      setWizardState({ genre: template.genreId, visualLook: template.preset.rendering_style || null, tones: {} });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const activePreset = presets.find(p => p.id === activeStylePresetId);
 
   return (
@@ -919,7 +1248,7 @@ export default function StyleCharacterPanel({
 
       {/* ── Wizard view ─── */}
       {view === "wizard" ? (
-        <StyleWizard onApply={handleWizardApply} current={wizardState} />
+        <StyleWizard onApply={handleWizardApply} onApplyStarter={handleStarterApply} current={wizardState} />
       ) : null}
 
       {/* ── Presets view ─── */}

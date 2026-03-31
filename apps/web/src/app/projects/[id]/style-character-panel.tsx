@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
 
-/* ── Types ─────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   Types
+   ═══════════════════════════════════════════════════════ */
 
 interface StylePreset {
   id: string;
@@ -77,111 +79,348 @@ interface ContinuityPreview {
   reference_count: number;
 }
 
-/* ── Style Form ───────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   Genre / Visual Look / Tone presets
+   ═══════════════════════════════════════════════════════ */
 
-const STYLE_FIELDS: { key: keyof StylePreset; label: string; multi?: boolean; group?: string }[] = [
-  { key: "name", label: "이름", group: "기본" },
-  { key: "description", label: "설명", multi: true, group: "기본" },
-  { key: "style_anchor", label: "스타일 앵커 (핵심 DNA)", multi: true, group: "앵커" },
-  { key: "style_keywords", label: "스타일 키워드", multi: true, group: "앵커" },
-  { key: "color_palette", label: "색상 팔레트", multi: true, group: "앵커" },
-  { key: "color_temperature", label: "색온도 (예: warm 3200K)", group: "앵커" },
-  { key: "rendering_style", label: "렌더링 스타일", multi: true, group: "렌더" },
-  { key: "texture_quality", label: "텍스처 품질 (예: photorealistic 8k)", group: "렌더" },
-  { key: "depth_style", label: "피사계 심도 (예: shallow DOF f/1.4)", group: "렌더" },
-  { key: "camera_language", label: "카메라 언어", multi: true, group: "렌더" },
-  { key: "lighting_rules", label: "조명 규칙", multi: true, group: "조명" },
-  { key: "environment_rules", label: "환경 일관성 규칙", multi: true, group: "환경" },
-  { key: "negative_rules", label: "네거티브 규칙", multi: true, group: "네거티브" },
-  { key: "prompt_prefix", label: "프롬프트 접두사", multi: true, group: "프롬프트" },
-  { key: "negative_prompt", label: "네거티브 프롬프트", multi: true, group: "네거티브" },
+interface GenreOption {
+  id: string;
+  label: string;
+  icon: string;
+  desc: string;
+  defaults: { rendering: string; camera: string; lighting: string; color: string };
+}
+
+const GENRES: GenreOption[] = [
+  { id: "longform", label: "일반 롱폼", icon: "📹", desc: "유튜브/틱톡 등 일반 콘텐츠",
+    defaults: { rendering: "cinematic", camera: "dynamic mixed angles", lighting: "natural key light", color: "neutral balanced" } },
+  { id: "restaurant", label: "식당 홍보", icon: "🍽", desc: "음식/맛집/식당 소개 영상",
+    defaults: { rendering: "commercial", camera: "close-up food detail + wide interior", lighting: "warm golden ambient", color: "warm 3200K golden hour" } },
+  { id: "product", label: "제품 광고", icon: "📦", desc: "제품/브랜드 프로모션",
+    defaults: { rendering: "premium_commercial", camera: "studio macro + lifestyle", lighting: "studio 3-point softbox", color: "clean white balance neutral" } },
+  { id: "influencer", label: "AI 인플루언서", icon: "🤳", desc: "가상 인물 기반 콘텐츠",
+    defaults: { rendering: "stylized_realism", camera: "portrait 85mm f/1.4", lighting: "beauty ring light", color: "skin-tone optimized warm" } },
+  { id: "drama", label: "드라마/단편", icon: "🎬", desc: "스토리 기반 드라마/영화",
+    defaults: { rendering: "cinematic_realism", camera: "cinematic anamorphic 2.39:1", lighting: "motivated source lighting", color: "film LUT orange-teal" } },
 ];
 
-function StyleForm({
-  initial,
-  onSave,
-  onCancel,
-  saving,
-}: {
-  initial: Partial<StylePreset>;
-  onSave: (data: Record<string, string>) => void;
-  onCancel: () => void;
-  saving: boolean;
+interface VisualLookOption {
+  id: string;
+  label: string;
+  desc: string;
+  color: string;
+  keywords: string;
+  recommended: string[];
+}
+
+const VISUAL_LOOKS: VisualLookOption[] = [
+  { id: "cinematic_realism", label: "시네마틱 리얼리즘", desc: "영화 같은 현실적 화면",
+    color: "from-amber-900/30 to-neutral-900", keywords: "photorealistic, cinematic color grading, film grain",
+    recommended: ["longform", "drama"] },
+  { id: "stylized_animation", label: "스타일화 애니메이션", desc: "2D/3D 하이브리드 스타일",
+    color: "from-violet-900/30 to-neutral-900", keywords: "stylized 3d render, vibrant colors, smooth shading",
+    recommended: ["influencer", "longform"] },
+  { id: "webtoon_anime", label: "웹툰/애니메 룩", desc: "한국 웹툰 · 일본 애니메이션",
+    color: "from-pink-900/30 to-neutral-900", keywords: "anime style, cel shading, bold outlines, vivid palette",
+    recommended: ["longform", "drama"] },
+  { id: "premium_commercial", label: "프리미엄 광고", desc: "고급 제품/브랜드 촬영",
+    color: "from-cyan-900/30 to-neutral-900", keywords: "studio photography, product lighting, clean background, 8k detail",
+    recommended: ["product", "restaurant"] },
+  { id: "documentary_realism", label: "다큐멘터리 리얼리즘", desc: "자연스러운 다큐 톤",
+    color: "from-emerald-900/30 to-neutral-900", keywords: "handheld natural light, muted tones, authentic textures",
+    recommended: ["longform", "restaurant"] },
+];
+
+interface ToneOption {
+  id: string;
+  label: string;
+  choices: { value: string; label: string }[];
+}
+
+const TONE_AXES: ToneOption[] = [
+  { id: "color_temp", label: "색감", choices: [
+    { value: "warm_golden", label: "따뜻한 골드" },
+    { value: "neutral", label: "뉴트럴" },
+    { value: "cool_blue", label: "차가운 블루" },
+    { value: "high_contrast", label: "고대비" },
+    { value: "pastel_soft", label: "파스텔 소프트" },
+  ]},
+  { id: "lighting", label: "조명", choices: [
+    { value: "natural", label: "자연광" },
+    { value: "studio_3point", label: "스튜디오 3점" },
+    { value: "dramatic_shadow", label: "드라마틱 음영" },
+    { value: "neon_vibrant", label: "네온/바이브런트" },
+    { value: "soft_diffused", label: "소프트 확산" },
+  ]},
+  { id: "camera_style", label: "카메라 스타일", choices: [
+    { value: "cinematic_wide", label: "시네마틱 와이드" },
+    { value: "portrait_shallow", label: "인물 보케" },
+    { value: "macro_detail", label: "매크로 디테일" },
+    { value: "handheld_raw", label: "핸드헬드 로우" },
+    { value: "drone_aerial", label: "드론/에어리얼" },
+  ]},
+  { id: "motion", label: "움직임 성향", choices: [
+    { value: "static_stable", label: "정적/안정" },
+    { value: "slow_smooth", label: "슬로우 부드러움" },
+    { value: "dynamic_fast", label: "다이내믹 빠름" },
+    { value: "parallax_subtle", label: "미세 패럴랙스" },
+  ]},
+];
+
+/* ═══════════════════════════════════════════════════════
+   Style Wizard (3-step)
+   ═══════════════════════════════════════════════════════ */
+
+interface WizardState {
+  genre: string | null;
+  visualLook: string | null;
+  tones: Record<string, string>;
+}
+
+function StyleWizard({ onApply, current }: {
+  onApply: (state: WizardState, presetData: Record<string, string>) => void;
+  current: WizardState;
 }) {
-  const [form, setForm] = useState<Record<string, string>>({});
+  const [genre, setGenre] = useState(current.genre);
+  const [look, setLook] = useState(current.visualLook);
+  const [tones, setTones] = useState<Record<string, string>>(current.tones);
+  const [step, setStep] = useState(1);
 
-  useEffect(() => {
-    const f: Record<string, string> = {};
-    for (const { key } of STYLE_FIELDS) {
-      f[key] = (initial[key] as string) ?? "";
+  const genreDef = GENRES.find(g => g.id === genre);
+  const lookDef = VISUAL_LOOKS.find(l => l.id === look);
+
+  const filteredLooks = useMemo(() => {
+    if (!genre) return VISUAL_LOOKS;
+    return [...VISUAL_LOOKS].sort((a, b) => {
+      const aRec = a.recommended.includes(genre) ? 0 : 1;
+      const bRec = b.recommended.includes(genre) ? 0 : 1;
+      return aRec - bRec;
+    });
+  }, [genre]);
+
+  const promptPreview = useMemo(() => {
+    const parts: string[] = [];
+    if (lookDef) parts.push(lookDef.keywords);
+    if (genreDef) {
+      parts.push(`camera: ${genreDef.defaults.camera}`);
+      parts.push(`lighting: ${genreDef.defaults.lighting}`);
     }
-    setForm(f);
-  }, [initial]);
+    for (const axis of TONE_AXES) {
+      const val = tones[axis.id];
+      if (val) {
+        const ch = axis.choices.find(c => c.value === val);
+        if (ch) parts.push(`${axis.label}: ${ch.label}`);
+      }
+    }
+    return parts.join(" · ");
+  }, [lookDef, genreDef, tones]);
 
-  let lastGroup = "";
+  const buildPresetData = (): Record<string, string> => {
+    const data: Record<string, string> = {};
+    data.name = `${genreDef?.label || "커스텀"} — ${lookDef?.label || "기본"}`;
+    data.description = `${genreDef?.desc || ""} + ${lookDef?.desc || ""}`;
+    if (lookDef) data.style_keywords = lookDef.keywords;
+    if (lookDef) data.rendering_style = lookDef.id;
+    if (genreDef) {
+      data.camera_language = genreDef.defaults.camera;
+      data.lighting_rules = genreDef.defaults.lighting;
+      data.color_palette = genreDef.defaults.color;
+    }
+    const toneLabel = tones.color_temp;
+    if (toneLabel) data.color_temperature = toneLabel.replace(/_/g, " ");
+    const lightTone = tones.lighting;
+    if (lightTone) data.lighting_rules = (data.lighting_rules || "") + `, ${lightTone.replace(/_/g, " ")}`;
+    const camTone = tones.camera_style;
+    if (camTone) data.camera_language = (data.camera_language || "") + `, ${camTone.replace(/_/g, " ")}`;
+    data.style_anchor = `${lookDef?.label || ""} style for ${genreDef?.label || ""} content. ${lookDef?.keywords || ""}`;
+    return data;
+  };
+
+  const handleApply = () => {
+    const state: WizardState = { genre, visualLook: look, tones };
+    onApply(state, buildPresetData());
+  };
 
   return (
-    <div className="space-y-3">
-      {STYLE_FIELDS.map(({ key, label, multi, group }) => {
-        const showGroup = group && group !== lastGroup;
-        if (group) lastGroup = group;
-        return (
-          <div key={key}>
-            {showGroup && (
-              <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-wider pt-3 pb-1">{group}</p>
-            )}
-            <label className="block text-xs font-medium text-neutral-400 mb-1">{label}</label>
-            {multi ? (
-              <textarea
-                value={form[key] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                rows={2}
-                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none resize-none"
-              />
-            ) : (
-              <input
-                type="text"
-                value={form[key] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none"
-              />
-            )}
-          </div>
-        );
-      })}
-      <div className="flex gap-2 pt-2">
-        <button onClick={() => onSave(form)} disabled={saving || !form.name?.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition">
-          {saving ? "저장 중..." : "저장"}
-        </button>
-        <button onClick={onCancel} className="rounded-lg bg-neutral-700 px-4 py-2 text-sm font-medium hover:bg-neutral-600 transition">취소</button>
+    <div className="space-y-5">
+      {/* Step indicators */}
+      <div className="flex items-center gap-2">
+        {[1, 2, 3].map(s => (
+          <button key={s} onClick={() => setStep(s)} className="flex items-center gap-1.5">
+            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition ${
+              step === s ? "bg-blue-600 text-white" : s < step || (s === 1 && genre) || (s === 2 && look) ? "bg-emerald-600/20 text-emerald-400 border border-emerald-600/30" : "bg-neutral-800 text-neutral-600"
+            }`}>{s < step || (s === 1 && genre) || (s === 2 && look) ? "✓" : s}</span>
+            <span className={`text-xs font-medium ${step === s ? "text-neutral-200" : "text-neutral-500"}`}>
+              {s === 1 ? "장르" : s === 2 ? "비주얼 룩" : "톤 설정"}
+            </span>
+            {s < 3 ? <span className="text-neutral-700 mx-1">→</span> : null}
+          </button>
+        ))}
       </div>
+
+      {/* Step 1: Genre */}
+      {step === 1 ? (
+        <div className="space-y-3">
+          <p className="text-sm text-neutral-400">어떤 영상을 만드시나요?</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {GENRES.map(g => (
+              <button
+                key={g.id}
+                onClick={() => { setGenre(g.id); setStep(2); }}
+                className={`rounded-xl border p-4 text-left transition-all ${
+                  genre === g.id
+                    ? "border-blue-600 bg-blue-950/20 ring-1 ring-blue-500/20"
+                    : "border-neutral-800 bg-neutral-900/50 hover:border-neutral-700"
+                }`}
+              >
+                <span className="text-2xl">{g.icon}</span>
+                <p className="text-sm font-bold text-neutral-200 mt-2">{g.label}</p>
+                <p className="text-[10px] text-neutral-500 mt-1">{g.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Step 2: Visual look */}
+      {step === 2 ? (
+        <div className="space-y-3">
+          <p className="text-sm text-neutral-400">어떤 비주얼 느낌을 원하시나요?</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {filteredLooks.map(l => {
+              const isRecommended = genre ? l.recommended.includes(genre) : false;
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => { setLook(l.id); setStep(3); }}
+                  className={`rounded-xl border overflow-hidden text-left transition-all ${
+                    look === l.id
+                      ? "border-blue-600 ring-1 ring-blue-500/20"
+                      : "border-neutral-800 hover:border-neutral-700"
+                  }`}
+                >
+                  <div className={`h-16 bg-gradient-to-br ${l.color} relative`}>
+                    {isRecommended ? (
+                      <span className="absolute top-1.5 right-1.5 text-[8px] px-1.5 py-0.5 rounded-full bg-emerald-600/30 text-emerald-400 font-medium border border-emerald-700/30">
+                        추천
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="p-3">
+                    <p className="text-sm font-bold text-neutral-200">{l.label}</p>
+                    <p className="text-[10px] text-neutral-500 mt-0.5">{l.desc}</p>
+                    <p className="text-[9px] text-neutral-600 mt-1 line-clamp-1">{l.keywords}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Step 3: Tone */}
+      {step === 3 ? (
+        <div className="space-y-4">
+          <p className="text-sm text-neutral-400">세부 톤을 선택하세요 (선택 사항)</p>
+          {TONE_AXES.map(axis => (
+            <div key={axis.id} className="space-y-1.5">
+              <p className="text-xs font-medium text-neutral-400">{axis.label}</p>
+              <div className="flex flex-wrap gap-2">
+                {axis.choices.map(ch => (
+                  <button
+                    key={ch.value}
+                    onClick={() => setTones(prev => ({
+                      ...prev,
+                      [axis.id]: prev[axis.id] === ch.value ? "" : ch.value,
+                    }))}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-medium border transition ${
+                      tones[axis.id] === ch.value
+                        ? "bg-blue-600/20 border-blue-700/40 text-blue-400"
+                        : "bg-neutral-800/50 border-neutral-700/50 text-neutral-400 hover:text-neutral-200"
+                    }`}
+                  >
+                    {ch.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Preview & apply */}
+      {(genre || look) ? (
+        <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-bold text-neutral-500 uppercase">선택 요약</p>
+            {genre && look ? (
+              <button
+                onClick={handleApply}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-500 transition"
+              >
+                이 스타일 적용
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {genreDef ? (
+              <span className="text-[10px] px-2 py-1 rounded-lg bg-blue-900/20 text-blue-400 border border-blue-800/30">
+                {genreDef.icon} {genreDef.label}
+              </span>
+            ) : null}
+            {lookDef ? (
+              <span className="text-[10px] px-2 py-1 rounded-lg bg-violet-900/20 text-violet-400 border border-violet-800/30">
+                {lookDef.label}
+              </span>
+            ) : null}
+            {Object.entries(tones).filter(([, v]) => v).map(([k, v]) => {
+              const axis = TONE_AXES.find(a => a.id === k);
+              const ch = axis?.choices.find(c => c.value === v);
+              return ch ? (
+                <span key={k} className="text-[10px] px-2 py-1 rounded-lg bg-neutral-800 text-neutral-400 border border-neutral-700/50">
+                  {axis?.label}: {ch.label}
+                </span>
+              ) : null;
+            })}
+          </div>
+          {promptPreview ? (
+            <div className="rounded-lg bg-emerald-950/10 border border-emerald-800/20 p-3">
+              <p className="text-[9px] font-bold text-emerald-400 mb-1">프롬프트에 반영되는 내용</p>
+              <p className="text-[10px] text-emerald-300/80 leading-relaxed">{promptPreview}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/* ── Character Form ───────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   Simplified Character Form
+   ═══════════════════════════════════════════════════════ */
 
-const CHAR_FIELDS: { key: keyof CharacterProfile; label: string; multi?: boolean; group?: string }[] = [
-  { key: "name", label: "이름", group: "기본" },
-  { key: "role", label: "역할", group: "기본" },
-  { key: "age_impression", label: "나이 인상", group: "기본" },
-  { key: "description", label: "설명", multi: true, group: "기본" },
-  { key: "body_type", label: "체형 (예: slim athletic, 170cm)", group: "외형" },
-  { key: "skin_tone", label: "피부톤 (예: fair warm undertones)", group: "외형" },
-  { key: "hair_description", label: "머리카락 상세 (색상, 길이, 스타일)", multi: true, group: "외형" },
-  { key: "appearance", label: "전체 외형 (영어)", multi: true, group: "외형" },
-  { key: "outfit", label: "의상 (영어)", multi: true, group: "외형" },
-  { key: "facial_traits", label: "얼굴 특징 (영어)", multi: true, group: "외형" },
-  { key: "signature_props", label: "시그니처 소품 (항상 착용)", multi: true, group: "일관성" },
-  { key: "personality", label: "성격/특성", multi: true, group: "일관성" },
-  { key: "pose_rules", label: "포즈 규칙 (영어)", multi: true, group: "일관성" },
-  { key: "forbidden_changes", label: "변경 금지 사항 (레거시)", multi: true, group: "드리프트 방지" },
-  { key: "forbidden_drift", label: "Forbidden Drift (구조화)", multi: true, group: "드리프트 방지" },
-  { key: "visual_prompt", label: "Visual Prompt (컴파일 결과)", multi: true, group: "프롬프트" },
-  { key: "voice_id", label: "TTS Voice ID", group: "오디오" },
+const CHAR_SIMPLE_FIELDS: { key: keyof CharacterProfile; label: string; placeholder: string; multi?: boolean }[] = [
+  { key: "name", label: "이름/명칭", placeholder: "주인공, 제품명, 브랜드 등" },
+  { key: "role", label: "역할", placeholder: "주인공, 조연, 내레이터 등" },
+  { key: "appearance", label: "외형 유지 (핵심)", placeholder: "예: 긴 흑발, 흰 셔츠, 날씬한 체형", multi: true },
+  { key: "outfit", label: "의상/소품 유지", placeholder: "예: 항상 빨간 재킷, 안경 착용", multi: true },
+  { key: "forbidden_drift", label: "절대 변하면 안 되는 것", placeholder: "예: 머리색 변경 금지, 나이 변화 금지", multi: true },
 ];
 
-function CharacterForm({
+const CHAR_ADVANCED_FIELDS: { key: keyof CharacterProfile; label: string; placeholder: string; multi?: boolean }[] = [
+  { key: "age_impression", label: "나이 인상", placeholder: "예: 20대 초반" },
+  { key: "body_type", label: "체형", placeholder: "예: slim athletic, 170cm" },
+  { key: "skin_tone", label: "피부톤", placeholder: "예: fair warm undertones" },
+  { key: "hair_description", label: "머리카락 상세", placeholder: "색상, 길이, 스타일", multi: true },
+  { key: "facial_traits", label: "얼굴 특징 (영어)", placeholder: "예: sharp jawline, big eyes", multi: true },
+  { key: "signature_props", label: "시그니처 소품", placeholder: "항상 착용하는 아이템", multi: true },
+  { key: "personality", label: "성격/특성", placeholder: "예: cheerful, bold", multi: true },
+  { key: "pose_rules", label: "포즈 규칙 (영어)", placeholder: "자세/동작 규칙", multi: true },
+  { key: "visual_prompt", label: "Visual Prompt (자동 생성)", placeholder: "컴파일러가 자동 조합", multi: true },
+  { key: "voice_id", label: "TTS Voice ID", placeholder: "ElevenLabs Voice ID" },
+];
+
+function SimpleCharacterForm({
   initial,
   onSave,
   onCancel,
@@ -193,46 +432,54 @@ function CharacterForm({
   saving: boolean;
 }) {
   const [form, setForm] = useState<Record<string, string>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     const f: Record<string, string> = {};
-    for (const { key } of CHAR_FIELDS) {
+    for (const { key } of [...CHAR_SIMPLE_FIELDS, ...CHAR_ADVANCED_FIELDS]) {
       f[key] = (initial[key] as string) ?? "";
     }
     setForm(f);
   }, [initial]);
 
-  let lastGroup = "";
+  const renderField = (field: { key: string; label: string; placeholder: string; multi?: boolean }) => (
+    <div key={field.key} className="space-y-1">
+      <label className="text-xs font-medium text-neutral-400">{field.label}</label>
+      {field.multi ? (
+        <textarea
+          value={form[field.key] ?? ""}
+          onChange={e => setForm(p => ({ ...p, [field.key]: e.target.value }))}
+          rows={2}
+          placeholder={field.placeholder}
+          className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:border-blue-500 focus:outline-none resize-none"
+        />
+      ) : (
+        <input
+          type="text"
+          value={form[field.key] ?? ""}
+          onChange={e => setForm(p => ({ ...p, [field.key]: e.target.value }))}
+          placeholder={field.placeholder}
+          className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-600 focus:border-blue-500 focus:outline-none"
+        />
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-3">
-      {CHAR_FIELDS.map(({ key, label, multi, group }) => {
-        const showGroup = group && group !== lastGroup;
-        if (group) lastGroup = group;
-        return (
-          <div key={key}>
-            {showGroup && (
-              <p className="text-[10px] font-bold text-neutral-600 uppercase tracking-wider pt-3 pb-1">{group}</p>
-            )}
-            <label className="block text-xs font-medium text-neutral-400 mb-1">{label}</label>
-            {multi ? (
-              <textarea
-                value={form[key] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                rows={2}
-                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none resize-none"
-              />
-            ) : (
-              <input
-                type="text"
-                value={form[key] ?? ""}
-                onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none"
-              />
-            )}
-          </div>
-        );
-      })}
+      <p className="text-[10px] text-neutral-500">
+        핵심 필드만 채우면 됩니다. 나머지는 AI가 자동 보완합니다.
+      </p>
+      {CHAR_SIMPLE_FIELDS.map(renderField)}
+
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="text-[10px] font-medium text-neutral-500 hover:text-neutral-300 transition"
+      >
+        {showAdvanced ? "▾ 고급 필드 닫기" : "▸ 고급 필드 열기 (선택 사항)"}
+      </button>
+      {showAdvanced ? CHAR_ADVANCED_FIELDS.map(renderField) : null}
+
       <div className="flex gap-2 pt-2">
         <button onClick={() => onSave(form)} disabled={saving || !form.name?.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition">
           {saving ? "저장 중..." : "저장"}
@@ -243,169 +490,167 @@ function CharacterForm({
   );
 }
 
-/* ── Style Preset Card ────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   Character Card (simplified)
+   ═══════════════════════════════════════════════════════ */
 
-function StylePresetCard({
-  preset,
-  isActive,
-  onActivate,
-  onEdit,
-  onDuplicate,
-  onDelete,
-}: {
-  preset: StylePreset;
-  isActive: boolean;
-  onActivate: () => void;
-  onEdit: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
+function CharacterCard({ char, onEdit, onDelete }: { char: CharacterProfile; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 flex items-start gap-4">
+      <div className="w-12 h-12 rounded-full bg-purple-900/30 border border-purple-800/30 flex items-center justify-center shrink-0">
+        <span className="text-lg">{char.name.charAt(0)}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-sm font-bold text-neutral-200">{char.name}</span>
+          {char.role ? <span className="text-[9px] bg-purple-900/40 text-purple-400 px-1.5 py-0.5 rounded-full">{char.role}</span> : null}
+        </div>
+        {char.appearance ? <p className="text-[10px] text-neutral-500 line-clamp-1">{char.appearance}</p> : null}
+        {char.forbidden_drift ? (
+          <p className="text-[9px] text-red-400/70 mt-0.5 line-clamp-1">고정: {char.forbidden_drift}</p>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button onClick={onEdit} className="rounded bg-neutral-700 px-2.5 py-1 text-[10px] font-medium hover:bg-neutral-600 transition">수정</button>
+        <button onClick={onDelete} className="rounded bg-red-900/30 px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-800/30 transition">삭제</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   Style Preset Card (improved)
+   ═══════════════════════════════════════════════════════ */
+
+function PresetCard({ preset, isActive, onActivate, onEdit, onDelete }: {
+  preset: StylePreset; isActive: boolean; onActivate: () => void; onEdit: () => void; onDelete: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const lookDef = VISUAL_LOOKS.find(l => l.id === preset.rendering_style);
 
   return (
-    <div className={`rounded-lg border overflow-hidden ${isActive ? "border-blue-600 bg-blue-950/20" : "border-neutral-800 bg-neutral-900/50"}`}>
-      <button onClick={() => setExpanded(!expanded)} className="w-full px-4 py-3 text-left">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            {isActive && <span className="shrink-0 w-2 h-2 rounded-full bg-blue-500" />}
-            <span className="text-sm font-semibold text-neutral-200 truncate">{preset.name}</span>
-            {preset.is_global && <span className="text-[10px] bg-neutral-700 text-neutral-400 px-1.5 py-px rounded-full">Global</span>}
-          </div>
-          <span className="text-xs text-neutral-600">{expanded ? "▲" : "▼"}</span>
-        </div>
-        {!expanded && (
-          <p className="mt-1 text-xs text-neutral-500 truncate">
-            {preset.style_anchor || preset.rendering_style || "No anchor set"}
-          </p>
-        )}
-      </button>
+    <div className={`rounded-xl border overflow-hidden transition-all ${
+      isActive ? "border-blue-600 bg-blue-950/15 ring-1 ring-blue-500/20" : "border-neutral-800 bg-neutral-900/50 hover:border-neutral-700"
+    }`}>
+      {/* Gradient thumbnail */}
+      <div className={`h-20 bg-gradient-to-br ${lookDef?.color || "from-neutral-800 to-neutral-900"} relative flex items-end p-3`}>
+        {isActive ? (
+          <span className="absolute top-2 right-2 text-[9px] px-2 py-0.5 rounded-full bg-blue-600 text-white font-bold">사용 중</span>
+        ) : null}
+        <p className="text-sm font-bold text-white drop-shadow-lg">{preset.name}</p>
+      </div>
 
-      {expanded && (
-        <div className="border-t border-neutral-800 px-4 py-3 space-y-2 text-xs">
-          {preset.description && <p className="text-neutral-400">{preset.description}</p>}
-          {preset.style_anchor && (
-            <div className="rounded bg-blue-950/30 border border-blue-900/30 px-3 py-2">
-              <span className="font-semibold text-blue-400">앵커: </span>
-              <span className="text-blue-300">{preset.style_anchor}</span>
-            </div>
-          )}
-          <div className="grid grid-cols-1 gap-2">
-            {preset.style_keywords && <Field label="키워드" value={preset.style_keywords} />}
-            {preset.color_palette && <Field label="색상 팔레트" value={preset.color_palette} color="text-amber-400/80" />}
-            {preset.color_temperature && <Field label="색온도" value={preset.color_temperature} color="text-orange-400/80" />}
-            {preset.rendering_style && <Field label="렌더링" value={preset.rendering_style} />}
-            {preset.texture_quality && <Field label="텍스처" value={preset.texture_quality} />}
-            {preset.depth_style && <Field label="심도" value={preset.depth_style} />}
-            {preset.camera_language && <Field label="카메라" value={preset.camera_language} color="text-cyan-400/80" />}
-            {preset.lighting_rules && <Field label="조명" value={preset.lighting_rules} color="text-yellow-400/80" />}
-            {preset.environment_rules && <Field label="환경 규칙" value={preset.environment_rules} color="text-green-400/80" />}
-            {preset.negative_rules && <Field label="네거티브" value={preset.negative_rules} color="text-red-400/80" />}
-            {preset.prompt_prefix && <Field label="접두사" value={preset.prompt_prefix} color="text-blue-400/80" />}
-            {preset.negative_prompt && <Field label="네거티브 프롬프트" value={preset.negative_prompt} color="text-red-400/60" />}
-          </div>
-          <div className="flex flex-wrap gap-2 pt-2">
-            {!isActive && (
-              <button onClick={onActivate} className="rounded bg-blue-700 px-3 py-1 text-[11px] font-medium hover:bg-blue-600 transition">적용</button>
-            )}
-            {!preset.is_global && (
-              <button onClick={onEdit} className="rounded bg-neutral-700 px-3 py-1 text-[11px] font-medium hover:bg-neutral-600 transition">수정</button>
-            )}
-            <button onClick={onDuplicate} className="rounded bg-neutral-700 px-3 py-1 text-[11px] font-medium hover:bg-neutral-600 transition">복제</button>
-            {!preset.is_global && (
-              <button onClick={onDelete} className="rounded bg-red-900/50 px-3 py-1 text-[11px] font-medium text-red-400 hover:bg-red-800/50 transition">삭제</button>
-            )}
-          </div>
+      <div className="p-3 space-y-2">
+        {preset.description ? <p className="text-[10px] text-neutral-500 line-clamp-2">{preset.description}</p> : null}
+
+        {/* Key info pills */}
+        <div className="flex flex-wrap gap-1">
+          {preset.rendering_style ? <span className="text-[8px] px-1.5 py-0.5 rounded bg-violet-900/20 text-violet-400">{lookDef?.label || preset.rendering_style}</span> : null}
+          {preset.color_temperature ? <span className="text-[8px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400">{preset.color_temperature}</span> : null}
+          {preset.lighting_rules ? <span className="text-[8px] px-1.5 py-0.5 rounded bg-yellow-900/20 text-yellow-400 line-clamp-1">{preset.lighting_rules.slice(0, 30)}</span> : null}
         </div>
-      )}
+
+        {/* Prompt impact */}
+        {preset.style_anchor ? (
+          <div className="rounded-lg bg-emerald-950/10 border border-emerald-800/20 p-2">
+            <p className="text-[8px] font-bold text-emerald-400 mb-0.5">프롬프트 영향</p>
+            <p className="text-[9px] text-emerald-300/70 line-clamp-2">{preset.style_anchor}</p>
+          </div>
+        ) : null}
+
+        {/* Actions */}
+        <div className="flex gap-1.5 pt-1">
+          {!isActive ? (
+            <button onClick={onActivate} className="rounded bg-blue-600 px-3 py-1 text-[10px] font-medium text-white hover:bg-blue-500 transition">적용</button>
+          ) : null}
+          {!preset.is_global ? (
+            <>
+              <button onClick={onEdit} className="rounded bg-neutral-700 px-2.5 py-1 text-[10px] font-medium hover:bg-neutral-600 transition">수정</button>
+              <button onClick={onDelete} className="rounded bg-red-900/30 px-2.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-800/30 transition">삭제</button>
+            </>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
 
-function Field({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div>
-      <span className="font-semibold text-neutral-500">{label}: </span>
-      <span className={color || "text-neutral-300"}>{value}</span>
-    </div>
-  );
-}
+/* ═══════════════════════════════════════════════════════
+   Style Form (existing advanced editor)
+   ═══════════════════════════════════════════════════════ */
 
-/* ── Character Card ───────────────────────────────── */
-
-function CharacterCard({
-  char,
-  onEdit,
-  onDelete,
-}: {
-  char: CharacterProfile;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 overflow-hidden">
-      <button onClick={() => setExpanded(!expanded)} className="w-full px-4 py-3 text-left">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold text-neutral-200 truncate">{char.name}</span>
-            {char.role && <span className="text-[10px] bg-purple-900/50 text-purple-400 px-1.5 py-px rounded-full">{char.role}</span>}
-            {char.age_impression && <span className="text-[10px] text-neutral-500">{char.age_impression}</span>}
-          </div>
-          <span className="text-xs text-neutral-600">{expanded ? "▲" : "▼"}</span>
-        </div>
-        {!expanded && <p className="mt-1 text-xs text-neutral-500 truncate">{char.body_type || char.description || "No details"}</p>}
-      </button>
-
-      {expanded && (
-        <div className="border-t border-neutral-800 px-4 py-3 space-y-2 text-xs">
-          {char.description && <p className="text-neutral-400">{char.description}</p>}
-          <div className="grid grid-cols-1 gap-2">
-            {char.body_type && <Field label="체형" value={char.body_type} />}
-            {char.skin_tone && <Field label="피부톤" value={char.skin_tone} />}
-            {char.hair_description && <Field label="머리카락" value={char.hair_description} />}
-            {char.appearance && <Field label="외형" value={char.appearance} />}
-            {char.outfit && <Field label="의상" value={char.outfit} />}
-            {char.facial_traits && <Field label="얼굴" value={char.facial_traits} />}
-            {char.signature_props && <Field label="시그니처 소품" value={char.signature_props} color="text-amber-400/80" />}
-            {char.personality && <Field label="성격" value={char.personality} color="text-purple-400/80" />}
-            {char.pose_rules && <Field label="포즈 규칙" value={char.pose_rules} color="text-cyan-400/80" />}
-            {char.forbidden_drift && (
-              <div className="rounded bg-red-950/20 border border-red-900/30 px-2 py-1">
-                <span className="font-semibold text-red-400">Forbidden Drift: </span>
-                <span className="text-red-300">{char.forbidden_drift}</span>
-              </div>
-            )}
-            {!char.forbidden_drift && char.forbidden_changes && (
-              <Field label="변경 금지" value={char.forbidden_changes} color="text-red-400/80" />
-            )}
-            {char.visual_prompt && <Field label="Visual Prompt" value={char.visual_prompt} color="text-blue-400/80" />}
-            {char.voice_id && <Field label="Voice ID" value={char.voice_id} />}
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={onEdit} className="rounded bg-neutral-700 px-3 py-1 text-[11px] font-medium hover:bg-neutral-600 transition">수정</button>
-            <button onClick={onDelete} className="rounded bg-red-900/50 px-3 py-1 text-[11px] font-medium text-red-400 hover:bg-red-800/50 transition">삭제</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Continuity Panel ─────────────────────────────── */
-
-const CONTINUITY_FIELDS: { key: keyof ContinuityProfile; label: string; multi?: boolean; hint?: string }[] = [
-  { key: "color_palette_lock", label: "색상 팔레트 잠금", multi: true, hint: "모든 샷에서 유지할 색상 (예: deep navy, teal accent, warm gold highlights)" },
-  { key: "lighting_anchor", label: "조명 앵커", multi: true, hint: "기준 조명 방향/스타일 (예: warm key from left 45°, cool fill, thin rim)" },
-  { key: "color_temperature_range", label: "색온도 범위", hint: "허용 범위 (예: 3000K-4500K warm dominant)" },
-  { key: "environment_consistency", label: "환경 일관성", multi: true, hint: "반복될 환경 요소 (예: always modern minimalist, clean surfaces, glass/metal)" },
-  { key: "style_anchor_summary", label: "스타일 앵커 요약", multi: true, hint: "프로젝트 전체 스타일 DNA (활성 프리셋에서 자동 생성 가능)" },
-  { key: "character_lock_notes", label: "캐릭터 잠금 노트", multi: true, hint: "전체 캐릭터 공통 잠금 규칙" },
-  { key: "forbidden_global_drift", label: "글로벌 Forbidden Drift", multi: true, hint: "절대 변하면 안 되는 것들 (예: no cartoon style, no warm-to-cold shift)" },
-  { key: "temporal_rules", label: "시간적 규칙", multi: true, hint: "시간 흐름에 따른 변화 규칙 (예: lighting gets warmer toward ending)" },
+const STYLE_FIELDS: { key: keyof StylePreset; label: string; multi?: boolean }[] = [
+  { key: "name", label: "이름" },
+  { key: "description", label: "설명", multi: true },
+  { key: "style_anchor", label: "스타일 앵커", multi: true },
+  { key: "style_keywords", label: "스타일 키워드", multi: true },
+  { key: "color_palette", label: "색상 팔레트", multi: true },
+  { key: "color_temperature", label: "색온도" },
+  { key: "rendering_style", label: "렌더링 스타일", multi: true },
+  { key: "texture_quality", label: "텍스처 품질" },
+  { key: "depth_style", label: "피사계 심도" },
+  { key: "camera_language", label: "카메라 언어", multi: true },
+  { key: "lighting_rules", label: "조명 규칙", multi: true },
+  { key: "environment_rules", label: "환경 규칙", multi: true },
+  { key: "negative_rules", label: "네거티브 규칙", multi: true },
+  { key: "prompt_prefix", label: "프롬프트 접두사", multi: true },
+  { key: "negative_prompt", label: "네거티브 프롬프트", multi: true },
 ];
 
-function ContinuityPanel({ projectId }: { projectId: string }) {
+function AdvancedStyleForm({ initial, onSave, onCancel, saving }: {
+  initial: Partial<StylePreset>;
+  onSave: (data: Record<string, string>) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [form, setForm] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const f: Record<string, string> = {};
+    for (const { key } of STYLE_FIELDS) f[key] = (initial[key] as string) ?? "";
+    setForm(f);
+  }, [initial]);
+
+  return (
+    <div className="space-y-3">
+      {STYLE_FIELDS.map(({ key, label, multi }) => (
+        <div key={key}>
+          <label className="block text-xs font-medium text-neutral-400 mb-1">{label}</label>
+          {multi ? (
+            <textarea value={form[key] ?? ""} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} rows={2}
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none resize-none" />
+          ) : (
+            <input type="text" value={form[key] ?? ""} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none" />
+          )}
+        </div>
+      ))}
+      <div className="flex gap-2 pt-2">
+        <button onClick={() => onSave(form)} disabled={saving || !form.name?.trim()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition">
+          {saving ? "저장 중..." : "저장"}
+        </button>
+        <button onClick={onCancel} className="rounded-lg bg-neutral-700 px-4 py-2 text-sm font-medium hover:bg-neutral-600 transition">취소</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   Continuity Advanced Section (collapsible)
+   ═══════════════════════════════════════════════════════ */
+
+const CONTINUITY_FIELDS: { key: keyof ContinuityProfile; label: string; multi?: boolean; hint: string }[] = [
+  { key: "color_palette_lock", label: "색상 팔레트 잠금", multi: true, hint: "모든 샷에서 유지할 색상" },
+  { key: "lighting_anchor", label: "조명 앵커", multi: true, hint: "기준 조명 방향/스타일" },
+  { key: "color_temperature_range", label: "색온도 범위", hint: "허용 범위 (예: 3000K-4500K)" },
+  { key: "environment_consistency", label: "환경 일관성", multi: true, hint: "반복될 환경 요소" },
+  { key: "style_anchor_summary", label: "스타일 앵커 요약", multi: true, hint: "프로젝트 전체 스타일 DNA" },
+  { key: "character_lock_notes", label: "캐릭터 잠금 노트", multi: true, hint: "전체 캐릭터 공통 잠금" },
+  { key: "forbidden_global_drift", label: "글로벌 Forbidden Drift", multi: true, hint: "절대 변하면 안 되는 것들" },
+  { key: "temporal_rules", label: "시간적 규칙", multi: true, hint: "시간 흐름에 따른 변화 규칙" },
+];
+
+function ContinuitySection({ projectId }: { projectId: string }) {
+  const [expanded, setExpanded] = useState(false);
   const [profile, setProfile] = useState<ContinuityProfile | null>(null);
   const [preview, setPreview] = useState<ContinuityPreview | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -419,20 +664,18 @@ function ContinuityPanel({ projectId }: { projectId: string }) {
         const data = await r.json();
         setProfile(data);
         const f: Record<string, string> = {};
-        for (const { key } of CONTINUITY_FIELDS) {
-          f[key] = (data[key] as string) ?? "";
-        }
+        for (const { key } of CONTINUITY_FIELDS) f[key] = (data[key] as string) ?? "";
         f.enabled = data.enabled ? "true" : "false";
         setForm(f);
       }
-    } catch {}
+    } catch { /* skip */ }
   }, [projectId]);
 
   const fetchPreview = useCallback(async () => {
     try {
       const r = await fetch(apiUrl(`/api/projects/${projectId}/continuity/preview`));
       if (r.ok) setPreview(await r.json());
-    } catch {}
+    } catch { /* skip */ }
   }, [projectId]);
 
   useEffect(() => { fetchProfile(); fetchPreview(); }, [fetchProfile, fetchPreview]);
@@ -458,114 +701,83 @@ function ContinuityPanel({ projectId }: { projectId: string }) {
     } finally { setSaving(false); }
   };
 
+  const hasData = preview && (preview.style_anchor || preview.color_rules || preview.forbidden_drift.length > 0);
+
   return (
-    <div className="space-y-4">
-      {/* Toggle + Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-neutral-200">Continuity 시스템</h3>
-          {profile && (
-            <button
-              onClick={async () => {
-                await fetch(apiUrl(`/api/projects/${projectId}/continuity`), {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ enabled: !profile.enabled }),
-                });
-                fetchProfile();
-                fetchPreview();
-              }}
-              className={`text-[10px] px-2 py-0.5 rounded-full font-medium transition ${
-                profile.enabled
-                  ? "bg-emerald-900/40 text-emerald-400 border border-emerald-800"
-                  : "bg-neutral-800 text-neutral-500 border border-neutral-700"
-              }`}
-            >
-              {profile.enabled ? "활성" : "비활성"}
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900/30">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-4 py-3 flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-neutral-400">고급 설정: Continuity 시스템</span>
+          {profile?.enabled ? (
+            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-emerald-900/30 text-emerald-400 font-medium">활성</span>
+          ) : (
+            <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-neutral-800 text-neutral-600 font-medium">비활성</span>
+          )}
+          {hasData ? (
+            <span className="text-[8px] text-neutral-600">설정됨</span>
+          ) : null}
+        </div>
+        <span className="text-xs text-neutral-600">{expanded ? "▾" : "▸"}</span>
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-neutral-800 px-4 py-4 space-y-4">
+          <p className="text-[10px] text-neutral-500">
+            이 설정은 스타일 위자드와 프리셋에서 처리하지 못하는 세밀한 일관성 규칙을 직접 작성할 때 사용합니다.
+            대부분의 경우 위의 스타일 선택만으로 충분합니다.
+          </p>
+
+          {/* Preview */}
+          {preview && !editing ? (
+            <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3 space-y-2 text-xs">
+              {preview.style_anchor ? <p className="text-blue-400"><span className="font-bold">앵커:</span> {preview.style_anchor}</p> : null}
+              {preview.color_rules ? <p className="text-amber-400/80"><span className="font-bold text-neutral-500">색상:</span> {preview.color_rules}</p> : null}
+              {preview.lighting_rules ? <p className="text-yellow-400/80"><span className="font-bold text-neutral-500">조명:</span> {preview.lighting_rules}</p> : null}
+              {preview.forbidden_drift.length > 0 ? (
+                <p className="text-red-400/80"><span className="font-bold text-neutral-500">금지:</span> {preview.forbidden_drift.join(", ")}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!editing ? (
+            <button onClick={() => setEditing(true)} className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition">
+              Continuity 규칙 편집
             </button>
-          )}
-        </div>
-        {!editing && (
-          <button onClick={() => setEditing(true)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-500 transition">
-            설정 편집
-          </button>
-        )}
-      </div>
-
-      {/* Preview (compiled context) */}
-      {preview && !editing && (
-        <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-3">
-          <h4 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">컴파일된 Continuity Context (프롬프트에 주입됨)</h4>
-          {preview.style_anchor && (
-            <div className="rounded bg-blue-950/30 border border-blue-900/30 px-3 py-2">
-              <span className="text-[11px] font-semibold text-blue-400">STYLE ANCHOR: </span>
-              <span className="text-xs text-blue-300">{preview.style_anchor}</span>
-            </div>
-          )}
-          {preview.color_rules && <Field label="COLOR" value={preview.color_rules} color="text-amber-400/80" />}
-          {preview.lighting_rules && <Field label="LIGHTING" value={preview.lighting_rules} color="text-yellow-400/80" />}
-          {preview.environment_rules && <Field label="ENVIRONMENT" value={preview.environment_rules} color="text-green-400/80" />}
-          {preview.character_anchors.length > 0 && (
-            <div>
-              <span className="text-[11px] font-semibold text-purple-400">CHARACTERS:</span>
-              {preview.character_anchors.map((a, i) => (
-                <p key={i} className="text-xs text-purple-300 ml-2">• {a}</p>
+          ) : (
+            <div className="space-y-3">
+              {CONTINUITY_FIELDS.map(({ key, label, multi, hint }) => (
+                <div key={key}>
+                  <label className="block text-xs font-medium text-neutral-400 mb-1">{label}</label>
+                  <p className="text-[9px] text-neutral-600 mb-1">{hint}</p>
+                  {multi ? (
+                    <textarea value={form[key] ?? ""} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))} rows={2}
+                      className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none resize-none" />
+                  ) : (
+                    <input type="text" value={form[key] ?? ""} onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+                      className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none" />
+                  )}
+                </div>
               ))}
+              <div className="flex gap-2">
+                <button onClick={saveProfile} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition">
+                  {saving ? "저장 중..." : "저장"}
+                </button>
+                <button onClick={() => setEditing(false)} className="rounded-lg bg-neutral-700 px-4 py-2 text-sm font-medium hover:bg-neutral-600 transition">취소</button>
+              </div>
             </div>
           )}
-          {preview.forbidden_drift.length > 0 && (
-            <div>
-              <span className="text-[11px] font-semibold text-red-400">FORBIDDEN DRIFT:</span>
-              {preview.forbidden_drift.map((d, i) => (
-                <p key={i} className="text-xs text-red-300 ml-2">• {d}</p>
-              ))}
-            </div>
-          )}
-          <p className="text-[10px] text-neutral-600">Reference assets: {preview.reference_count}개</p>
         </div>
-      )}
-
-      {/* Edit form */}
-      {editing && (
-        <div className="rounded-xl border border-blue-900/30 bg-blue-950/10 p-4 space-y-3">
-          {CONTINUITY_FIELDS.map(({ key, label, multi, hint }) => (
-            <div key={key}>
-              <label className="block text-xs font-medium text-neutral-400 mb-1">{label}</label>
-              {hint && <p className="text-[10px] text-neutral-600 mb-1">{hint}</p>}
-              {multi ? (
-                <textarea
-                  value={form[key] ?? ""}
-                  onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                  rows={2}
-                  className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none resize-none"
-                />
-              ) : (
-                <input
-                  type="text"
-                  value={form[key] ?? ""}
-                  onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                  className="w-full rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 focus:border-blue-500 focus:outline-none"
-                />
-              )}
-            </div>
-          ))}
-          <div className="flex gap-2 pt-2">
-            <button onClick={saveProfile} disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition">
-              {saving ? "저장 중..." : "저장"}
-            </button>
-            <button onClick={() => setEditing(false)} className="rounded-lg bg-neutral-700 px-4 py-2 text-sm font-medium hover:bg-neutral-600 transition">취소</button>
-          </div>
-        </div>
-      )}
-
-      {!preview && !editing && (
-        <p className="text-xs text-neutral-500 text-center py-4">Continuity 프로필을 설정하면 모든 Shot/Frame 생성에 일관성 규칙이 자동 주입됩니다.</p>
-      )}
+      ) : null}
     </div>
   );
 }
 
-/* ── Main Panel ───────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   Main Panel
+   ═══════════════════════════════════════════════════════ */
 
 export default function StyleCharacterPanel({
   projectId,
@@ -576,49 +788,48 @@ export default function StyleCharacterPanel({
   activeStylePresetId: string | null;
   onActiveStyleChange: (id: string | null) => void;
 }) {
-  const [subTab, setSubTab] = useState<"style" | "character" | "continuity">("style");
-
+  const [view, setView] = useState<"wizard" | "presets" | "characters">("wizard");
   const [presets, setPresets] = useState<StylePreset[]>([]);
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
   const [editingStyle, setEditingStyle] = useState<StylePreset | null>(null);
   const [editingChar, setEditingChar] = useState<CharacterProfile | null>(null);
-  const [creatingStyle, setCreatingStyle] = useState(false);
   const [creatingChar, setCreatingChar] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [wizardState, setWizardState] = useState<WizardState>({ genre: null, visualLook: null, tones: {} });
 
   const fetchPresets = useCallback(async () => {
     try {
       const r = await fetch(apiUrl(`/api/projects/${projectId}/styles`));
-      if (r.ok) setPresets((await r.json()).presets);
-    } catch {}
+      if (r.ok) setPresets((await r.json()).presets || []);
+    } catch { /* skip */ }
   }, [projectId]);
 
   const fetchCharacters = useCallback(async () => {
     try {
       const r = await fetch(apiUrl(`/api/projects/${projectId}/characters`));
-      if (r.ok) setCharacters((await r.json()).characters);
-    } catch {}
+      if (r.ok) setCharacters((await r.json()).characters || []);
+    } catch { /* skip */ }
   }, [projectId]);
 
   useEffect(() => { fetchPresets(); fetchCharacters(); }, [fetchPresets, fetchCharacters]);
 
-  /* ── Style actions ─────────────────────────────── */
-
   const saveStyle = async (data: Record<string, string>, id?: string) => {
     setSaving(true);
     try {
-      const url = id
-        ? `/api/projects/${projectId}/styles/${id}`
-        : `/api/projects/${projectId}/styles`;
-      const r = await fetch(url, {
+      const url = id ? `/api/projects/${projectId}/styles/${id}` : `/api/projects/${projectId}/styles`;
+      const r = await fetch(apiUrl(url), {
         method: id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
       if (r.ok) {
+        const saved = await r.json();
         await fetchPresets();
         setEditingStyle(null);
-        setCreatingStyle(false);
+        if (!id && saved.id) {
+          await fetch(apiUrl(`/api/projects/${projectId}/active-style/${saved.id}`), { method: "POST" });
+          onActiveStyleChange(saved.id);
+        }
       }
     } finally { setSaving(false); }
   };
@@ -628,26 +839,17 @@ export default function StyleCharacterPanel({
     if (r.ok) onActiveStyleChange(presetId);
   };
 
-  const duplicateStyle = async (presetId: string) => {
-    const r = await fetch(apiUrl(`/api/projects/${projectId}/styles/${presetId}/duplicate`), { method: "POST" });
-    if (r.ok) fetchPresets();
-  };
-
   const deleteStyle = async (presetId: string) => {
     await fetch(apiUrl(`/api/projects/${projectId}/styles/${presetId}`), { method: "DELETE" });
     fetchPresets();
     if (activeStylePresetId === presetId) onActiveStyleChange(null);
   };
 
-  /* ── Character actions ─────────────────────────── */
-
   const saveChar = async (data: Record<string, string>, id?: string) => {
     setSaving(true);
     try {
-      const url = id
-        ? `/api/projects/${projectId}/characters/${id}`
-        : `/api/projects/${projectId}/characters`;
-      const r = await fetch(url, {
+      const url = id ? `/api/projects/${projectId}/characters/${id}` : `/api/projects/${projectId}/characters`;
+      const r = await fetch(apiUrl(url), {
         method: id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -665,22 +867,47 @@ export default function StyleCharacterPanel({
     fetchCharacters();
   };
 
-  /* ── Render ────────────────────────────────────── */
+  const handleWizardApply = (state: WizardState, presetData: Record<string, string>) => {
+    setWizardState(state);
+    saveStyle(presetData);
+  };
+
+  const activePreset = presets.find(p => p.id === activeStylePresetId);
 
   return (
-    <div className="space-y-4">
-      {/* Sub-tabs */}
+    <div className="space-y-5">
+      {/* Current style summary */}
+      {activePreset ? (
+        <div className="rounded-xl border border-blue-800/30 bg-blue-950/10 p-4 flex items-center gap-4">
+          <div className={`w-14 h-14 rounded-lg bg-gradient-to-br ${
+            VISUAL_LOOKS.find(l => l.id === activePreset.rendering_style)?.color || "from-neutral-800 to-neutral-900"
+          } shrink-0`} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] text-blue-400 font-medium">현재 적용된 스타일</p>
+            <p className="text-sm font-bold text-neutral-200">{activePreset.name}</p>
+            {activePreset.style_anchor ? <p className="text-[10px] text-neutral-500 line-clamp-1">{activePreset.style_anchor}</p> : null}
+          </div>
+          <button
+            onClick={() => setView("wizard")}
+            className="rounded-lg bg-neutral-800 border border-neutral-700/50 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition shrink-0"
+          >
+            변경
+          </button>
+        </div>
+      ) : null}
+
+      {/* View tabs */}
       <div className="flex gap-1 border-b border-neutral-800">
         {([
-          { key: "style" as const, label: "스타일 프리셋" },
-          { key: "character" as const, label: "캐릭터 프로필" },
-          { key: "continuity" as const, label: "Continuity" },
-        ]).map((t) => (
+          { key: "wizard" as const, label: "스타일 선택", desc: "빠른 설정" },
+          { key: "presets" as const, label: `프리셋 (${presets.length})`, desc: "상세 관리" },
+          { key: "characters" as const, label: `캐릭터 (${characters.length})`, desc: "인물/주체" },
+        ]).map(t => (
           <button
             key={t.key}
-            onClick={() => setSubTab(t.key)}
+            onClick={() => setView(t.key)}
             className={`px-4 py-2 text-sm font-medium transition border-b-2 -mb-px ${
-              subTab === t.key
+              view === t.key
                 ? "border-blue-500 text-blue-400"
                 : "border-transparent text-neutral-500 hover:text-neutral-300"
             }`}
@@ -690,70 +917,70 @@ export default function StyleCharacterPanel({
         ))}
       </div>
 
-      {subTab === "style" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-neutral-500">{presets.length}개 프리셋 (Global 포함)</p>
-            <button
-              onClick={() => { setCreatingStyle(true); setEditingStyle(null); }}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium hover:bg-blue-500 transition"
-            >
-              새 프리셋
-            </button>
-          </div>
+      {/* ── Wizard view ─── */}
+      {view === "wizard" ? (
+        <StyleWizard onApply={handleWizardApply} current={wizardState} />
+      ) : null}
 
-          {(creatingStyle || editingStyle) && (
+      {/* ── Presets view ─── */}
+      {view === "presets" ? (
+        <div className="space-y-3">
+          {editingStyle ? (
             <div className="rounded-xl border border-blue-900/50 bg-blue-950/10 p-4">
-              <h3 className="text-sm font-semibold mb-3">{editingStyle ? "프리셋 수정" : "새 프리셋"}</h3>
-              <StyleForm
-                initial={editingStyle ?? {}}
-                onSave={(data) => saveStyle(data, editingStyle?.id)}
-                onCancel={() => { setCreatingStyle(false); setEditingStyle(null); }}
+              <h3 className="text-sm font-semibold mb-3">프리셋 수정: {editingStyle.name}</h3>
+              <AdvancedStyleForm
+                initial={editingStyle}
+                onSave={data => saveStyle(data, editingStyle.id)}
+                onCancel={() => setEditingStyle(null)}
                 saving={saving}
               />
             </div>
-          )}
+          ) : null}
 
-          {presets.map((p) => (
-            <StylePresetCard
-              key={p.id}
-              preset={p}
-              isActive={activeStylePresetId === p.id}
-              onActivate={() => activateStyle(p.id)}
-              onEdit={() => { setEditingStyle(p); setCreatingStyle(false); }}
-              onDuplicate={() => duplicateStyle(p.id)}
-              onDelete={() => deleteStyle(p.id)}
-            />
-          ))}
-          {presets.length === 0 && <p className="text-sm text-neutral-500 text-center py-6">스타일 프리셋이 없습니다.</p>}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {presets.map(p => (
+              <PresetCard
+                key={p.id}
+                preset={p}
+                isActive={activeStylePresetId === p.id}
+                onActivate={() => activateStyle(p.id)}
+                onEdit={() => setEditingStyle(p)}
+                onDelete={() => deleteStyle(p.id)}
+              />
+            ))}
+          </div>
+          {presets.length === 0 ? <p className="text-sm text-neutral-500 text-center py-6">스타일 프리셋이 없습니다. 위자드로 빠르게 생성하세요.</p> : null}
         </div>
-      )}
+      ) : null}
 
-      {subTab === "character" && (
+      {/* ── Characters view ─── */}
+      {view === "characters" ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-neutral-500">{characters.length}개 캐릭터</p>
+            <p className="text-xs text-neutral-500">
+              핵심 필드만 채우세요. 나머지는 AI가 자동으로 보완합니다.
+            </p>
             <button
               onClick={() => { setCreatingChar(true); setEditingChar(null); }}
               className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium hover:bg-purple-500 transition"
             >
-              새 캐릭터
+              새 캐릭터/주체
             </button>
           </div>
 
-          {(creatingChar || editingChar) && (
+          {(creatingChar || editingChar) ? (
             <div className="rounded-xl border border-purple-900/50 bg-purple-950/10 p-4">
-              <h3 className="text-sm font-semibold mb-3">{editingChar ? "캐릭터 수정" : "새 캐릭터"}</h3>
-              <CharacterForm
+              <h3 className="text-sm font-semibold mb-3">{editingChar ? "캐릭터 수정" : "새 캐릭터/주체"}</h3>
+              <SimpleCharacterForm
                 initial={editingChar ?? {}}
-                onSave={(data) => saveChar(data, editingChar?.id)}
+                onSave={data => saveChar(data, editingChar?.id)}
                 onCancel={() => { setCreatingChar(false); setEditingChar(null); }}
                 saving={saving}
               />
             </div>
-          )}
+          ) : null}
 
-          {characters.map((c) => (
+          {characters.map(c => (
             <CharacterCard
               key={c.id}
               char={c}
@@ -761,15 +988,14 @@ export default function StyleCharacterPanel({
               onDelete={() => deleteChar(c.id)}
             />
           ))}
-          {characters.length === 0 && !creatingChar && (
-            <p className="text-sm text-neutral-500 text-center py-6">등록된 캐릭터가 없습니다.</p>
-          )}
+          {characters.length === 0 && !creatingChar ? (
+            <p className="text-sm text-neutral-500 text-center py-6">등록된 캐릭터/주체가 없습니다.</p>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
-      {subTab === "continuity" && (
-        <ContinuityPanel projectId={projectId} />
-      )}
+      {/* ── Continuity (always at bottom, collapsed) ─── */}
+      <ContinuitySection projectId={projectId} />
     </div>
   );
 }

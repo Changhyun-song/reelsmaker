@@ -202,7 +202,7 @@ async def handle_scene_plan(job_id: str, **params) -> dict:
         response, result = await generate_validated_with_semantic(
             provider, request, SceneBreakdownOutput,
             semantic_guard=validate_scene_breakdown_semantic,
-            max_attempts=3, max_semantic_retries=2,
+            max_attempts=2, max_semantic_retries=1,
         )
     except Exception as exc:
         await log_provider_run(

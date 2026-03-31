@@ -188,11 +188,11 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
     return res.json();
   }, []);
 
-  const pollJob = useCallback(async (jobId: string, maxWait = 600): Promise<Record<string, unknown>> => {
+  const pollJob = useCallback(async (jobId: string, maxWait = 600, intervalMs = 1500): Promise<Record<string, unknown>> => {
     const start = Date.now();
     while (Date.now() - start < maxWait * 1000) {
       if (abortRef.current) throw new Error("중단됨");
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, intervalMs));
       const job = await api(`/api/jobs/${jobId}`);
       if (job.status === "completed") return job;
       if (job.status === "failed") throw new Error(job.error_message || "작업 실패");
@@ -247,24 +247,50 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
       const scenes: SceneInfo[] = sd.scenes || [];
       setScenesData(scenes);
 
-      const allShots: ShotInfo[] = [];
-      for (let i = 0; i < scenes.length; i++) {
+      // Shot generation — fire all in parallel, then wait
+      setRunningDetail(`샷(Shot) 구성 중... (${scenes.length}개 씬 병렬 처리)`);
+      const shotJobIds: { sceneId: string; jobId: string }[] = [];
+      for (const sc of scenes) {
         if (abortRef.current) throw new Error("중단됨");
-        setRunningDetail(`샷(Shot) 구성 중... (${i + 1}/${scenes.length})`);
-        const shotJob = await api(`/api/projects/${projectId}/scenes/${scenes[i].id}/shots/generate`, { method: "POST" });
-        await pollJob(shotJob.id);
-        const shotData = await api(`/api/projects/${projectId}/scenes/${scenes[i].id}/shots`);
+        const shotJob = await api(`/api/projects/${projectId}/scenes/${sc.id}/shots/generate`, { method: "POST" });
+        shotJobIds.push({ sceneId: sc.id, jobId: shotJob.id });
+      }
+      let shotsDone = 0;
+      await Promise.all(
+        shotJobIds.map(async ({ jobId }) => {
+          await pollJob(jobId);
+          shotsDone++;
+          setRunningDetail(`샷(Shot) 구성 중... (${shotsDone}/${scenes.length})`);
+        }),
+      );
+
+      const allShots: ShotInfo[] = [];
+      for (const sc of scenes) {
+        const shotData = await api(`/api/projects/${projectId}/scenes/${sc.id}/shots`);
         allShots.push(...(shotData.shots || []));
       }
       setShotsData(allShots);
 
-      const allFrames: FrameInfo[] = [];
-      for (let i = 0; i < allShots.length; i++) {
+      // Frame generation — fire all in parallel, then wait
+      setRunningDetail(`프레임 구성 중... (${allShots.length}개 샷 병렬 처리)`);
+      const frameJobIds: { shotId: string; jobId: string }[] = [];
+      for (const shot of allShots) {
         if (abortRef.current) throw new Error("중단됨");
-        setRunningDetail(`프레임 구성 중... (${i + 1}/${allShots.length})`);
-        const fJob = await api(`/api/projects/${projectId}/shots/${allShots[i].id}/frames/generate`, { method: "POST" });
-        await pollJob(fJob.id);
-        const fd = await api(`/api/projects/${projectId}/shots/${allShots[i].id}/frames`);
+        const fJob = await api(`/api/projects/${projectId}/shots/${shot.id}/frames/generate`, { method: "POST" });
+        frameJobIds.push({ shotId: shot.id, jobId: fJob.id });
+      }
+      let framesDone = 0;
+      await Promise.all(
+        frameJobIds.map(async ({ jobId }) => {
+          await pollJob(jobId);
+          framesDone++;
+          setRunningDetail(`프레임 구성 중... (${framesDone}/${allShots.length})`);
+        }),
+      );
+
+      const allFrames: FrameInfo[] = [];
+      for (const shot of allShots) {
+        const fd = await api(`/api/projects/${projectId}/shots/${shot.id}/frames`);
         allFrames.push(...(fd.frames || []));
       }
       setFramesData(allFrames);

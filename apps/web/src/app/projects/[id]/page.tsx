@@ -39,6 +39,7 @@ import TimelineEditor from "@/features/timeline/TimelineEditor";
 import RenderPanel from "@/features/render/RenderPanel";
 import CostDashboard from "@/features/studio/CostDashboard";
 import PipelineInspector from "./pipeline-inspector";
+import GuidedWorkflow from "./guided-workflow";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 
@@ -2881,6 +2882,7 @@ export default function ProjectDetailPage({
   const [submitting, setSubmitting] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [easyMode, setEasyMode] = useState(true);
+  const [viewMode, setViewMode] = useState<"guided" | "autopilot" | "advanced">("guided");
   const [progress, setProgress] = useState<{
     script: boolean; scenes: number; shots: number; frames: number;
     images: number; videos: number; voices: number; subtitles: number;
@@ -2967,6 +2969,16 @@ export default function ProjectDetailPage({
     const id = setInterval(fetchProgress, 3000);
     return () => clearInterval(id);
   }, [fetchProgress]);
+
+  // Listen for guided-workflow navigation events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as string;
+      if (detail) setSection(detail as WorkspaceSection);
+    };
+    window.addEventListener("navigate-section", handler);
+    return () => window.removeEventListener("navigate-section", handler);
+  }, []);
 
   useEffect(() => {
     if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") return;
@@ -3097,59 +3109,82 @@ export default function ProjectDetailPage({
       {/* ═══ Overview ═══ */}
       {section === "overview" && (
         <div className="space-y-6">
-          {/* Mode Toggle */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">{project.title}</h1>
-              {project.description && (
-                <p className="mt-1 text-sm text-neutral-400">{project.description}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => setEasyMode(true)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                  easyMode ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
-                }`}
-              >
-                간편 모드
-              </button>
-              <button
-                onClick={() => setEasyMode(false)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                  !easyMode ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
-                }`}
-              >
-                전문가 모드
-              </button>
-            </div>
+          {/* Title */}
+          <div>
+            <h1 className="text-2xl font-bold">{project.title}</h1>
+            {project.description && (
+              <p className="mt-1 text-sm text-neutral-400">{project.description}</p>
+            )}
           </div>
 
-          {!hasApiKey && (
-            <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-4 py-3">
-              <p className="text-sm font-semibold text-amber-400">
-                AI 기능을 사용하려면 API 키가 필요합니다
-              </p>
-              <p className="text-xs text-amber-400/70 mt-1">
-                <code className="bg-amber-900/40 px-1 rounded">.env</code> 파일에 API 키를 설정한 뒤
-                컨테이너를 재시작하세요.
-              </p>
+          {/* View mode content */}
+          {viewMode === "guided" && (
+            <GuidedWorkflow
+              projectId={projectId}
+              progress={progress}
+              hasApiKey={hasApiKey}
+              onSwitchToAdvanced={() => { setViewMode("advanced"); setEasyMode(false); }}
+              onSwitchToAutoPilot={() => setViewMode("autopilot")}
+              onRefresh={fetchProgress}
+            />
+          )}
+
+          {viewMode === "autopilot" && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold">자동 파일럿</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode("guided")}
+                    className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition"
+                  >
+                    가이드 보기
+                  </button>
+                  <button
+                    onClick={() => { setViewMode("advanced"); setEasyMode(false); }}
+                    className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition"
+                  >
+                    전문가 모드
+                  </button>
+                </div>
+              </div>
+              <AutoPilot
+                projectId={projectId}
+                onComplete={() => fetchVersions()}
+                onSwitchToExpert={() => { setViewMode("advanced"); setEasyMode(false); setSection("script"); }}
+              />
             </div>
           )}
 
-          {easyMode ? (
-            <AutoPilot
-              projectId={projectId}
-              onComplete={() => fetchVersions()}
-              onSwitchToExpert={() => { setEasyMode(false); setSection("script"); }}
-            />
-          ) : (
-            <NextStepGuide
-              currentSection={section}
-              stepStatuses={stepStatuses}
-              onNavigate={setSection}
-              hasApiKey={hasApiKey}
-            />
+          {viewMode === "advanced" && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold">전문가 모드</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setViewMode("guided")}
+                    className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-neutral-200 transition"
+                  >
+                    가이드 보기
+                  </button>
+                  <button
+                    onClick={() => setViewMode("autopilot")}
+                    className="rounded-lg bg-violet-600/20 border border-violet-700/40 px-3 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-600/30 transition"
+                  >
+                    자동 파일럿
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500">
+                왼쪽 사이드바에서 각 단계를 선택하여 세부 조정할 수 있습니다.
+              </p>
+              <NextStepGuide
+                currentSection={section}
+                stepStatuses={stepStatuses}
+                onNavigate={setSection}
+                hasApiKey={hasApiKey}
+              />
+            </div>
           )}
 
           {/* Pipeline Inspector */}

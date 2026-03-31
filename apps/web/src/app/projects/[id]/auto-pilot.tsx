@@ -9,6 +9,7 @@ type Stage =
   | "idle"
   | "script_running" | "script_review"
   | "structure_running" | "structure_review"
+  | "prompts_running"
   | "images_running" | "images_review"
   | "videos_running" | "videos_review"
   | "audio_running" | "audio_review"
@@ -56,10 +57,11 @@ interface VoiceInfo {
 const STAGE_LABELS: Record<string, { label: string; num: number }> = {
   script: { label: "대본 작성", num: 1 },
   structure: { label: "장면 구성", num: 2 },
-  images: { label: "이미지 생성", num: 3 },
-  videos: { label: "비디오 생성", num: 4 },
-  audio: { label: "음성/자막", num: 5 },
-  assembly: { label: "최종 합성", num: 6 },
+  prompts: { label: "프롬프트 생성", num: 3 },
+  images: { label: "이미지 생성", num: 4 },
+  videos: { label: "비디오 생성", num: 5 },
+  audio: { label: "음성/자막", num: 6 },
+  assembly: { label: "최종 합성", num: 7 },
 };
 
 const DURATION_OPTIONS = [
@@ -79,7 +81,7 @@ const STYLE_OPTIONS = [
 /* ── Helpers ────────────────────────────────────────── */
 
 function StageIndicator({ current }: { current: Stage }) {
-  const stageKeys = ["script", "structure", "images", "videos", "audio", "assembly"];
+  const stageKeys = ["script", "structure", "prompts", "images", "videos", "audio", "assembly"];
   const currentBase = current.replace("_running", "").replace("_review", "");
   const currentIdx = stageKeys.indexOf(currentBase);
 
@@ -299,25 +301,120 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
     } catch (err) { handleError(err); }
   };
 
+  const runStoryPrompts = async () => {
+    if (!versionId) return;
+    try {
+      setStage("prompts_running");
+      setRunningDetail("전체 스토리 맥락 분석 중...");
+
+      const job = await api(`/api/projects/${projectId}/story-prompts/generate`, {
+        method: "POST",
+        body: JSON.stringify({ script_version_id: versionId }),
+      });
+
+      setRunningDetail("이미지 프롬프트 생성 중...");
+      await pollJob(job.id, 180);
+
+      setRunningDetail("프롬프트 생성 완료! 이미지 생성으로 넘어갑니다...");
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Proceed directly to image generation
+      await runImages();
+    } catch (err) { handleError(err); }
+  };
+
+  type CutStatus = "pending" | "generating" | "done" | "error";
+  interface CutState {
+    shotId: string;
+    frameId: string | null;
+    narration: string;
+    imageUrl: string | null;
+    videoUrl: string | null;
+    imageStatus: CutStatus;
+    videoStatus: CutStatus;
+    imageProgress: number;
+    videoProgress: number;
+  }
+  // Track per-cut generation state for real-time UI
+  const [cutStates, setCutStates] = useState<CutState[]>([]);
+  const [generatingPhase, setGeneratingPhase] = useState<"images" | "videos">("images");
+
   const runImages = async () => {
     try {
       setStage("images_running");
-      const frames = framesData.length > 0 ? framesData : [];
-      const jobs: string[] = [];
-      for (const frame of frames) {
+      setGeneratingPhase("images");
+
+      // Build cut states from shots+frames
+      const initial: CutState[] = shotsData.map((shot) => {
+        const frame = framesData.find(f => f.shot_id === shot.id);
+        return {
+          shotId: shot.id,
+          frameId: frame?.id || null,
+          narration: shot.description || shot.subject || `Shot ${shot.order_index + 1}`,
+          imageUrl: null,
+          videoUrl: null,
+          imageStatus: "pending",
+          videoStatus: "pending",
+          imageProgress: 0,
+          videoProgress: 0,
+        };
+      });
+      setCutStates(initial);
+
+      // Generate images one by one so we can show progress in real-time
+      const updatedCuts: CutState[] = [...initial];
+      for (let i = 0; i < updatedCuts.length; i++) {
         if (abortRef.current) throw new Error("중단됨");
-        const ij = await api(`/api/projects/${projectId}/frames/${frame.id}/images/generate`, {
+        const cut = updatedCuts[i];
+        if (!cut.frameId) continue;
+
+        // Mark generating
+        updatedCuts[i] = { ...cut, imageStatus: "generating" };
+        setCutStates([...updatedCuts]);
+
+        const ij = await api(`/api/projects/${projectId}/frames/${cut.frameId}/images/generate`, {
           method: "POST", body: JSON.stringify({ num_variants: 1 }),
         });
-        jobs.push(ij.id);
-      }
-      for (let i = 0; i < jobs.length; i++) {
-        if (abortRef.current) throw new Error("중단됨");
-        setRunningDetail(`이미지 생성 중... (${i + 1}/${jobs.length})`);
-        await pollJob(jobs[i]);
+
+        // Poll with progress
+        const start = Date.now();
+        while (true) {
+          if (abortRef.current) throw new Error("중단됨");
+          await new Promise((r) => setTimeout(r, 2000));
+          const job = await api(`/api/jobs/${ij.id}`);
+          if (job.progress > updatedCuts[i].imageProgress) {
+            updatedCuts[i] = { ...updatedCuts[i], imageProgress: job.progress };
+            setCutStates([...updatedCuts]);
+          }
+          if (job.status === "completed") break;
+          if (job.status === "failed") throw new Error(job.error_message || `Cut ${i + 1} 이미지 실패`);
+          if (Date.now() - start > 180000) throw new Error("이미지 생성 시간 초과");
+        }
+
+        // Fetch the generated image URL
+        try {
+          const ar = await api(`/api/projects/${projectId}/frames/${cut.frameId}/assets`);
+          const img = (ar.assets || []).find((a: AssetInfo) => a.asset_type === "image" && a.status === "ready");
+          if (img) {
+            let url = img.url;
+            if (!url) {
+              try {
+                const urlRes = await api(`/api/projects/${projectId}/assets/${img.id}/url`);
+                url = urlRes.url;
+              } catch { /* skip */ }
+            }
+            updatedCuts[i] = { ...updatedCuts[i], imageUrl: url, imageStatus: "done", imageProgress: 100 };
+          } else {
+            updatedCuts[i] = { ...updatedCuts[i], imageStatus: "done", imageProgress: 100 };
+          }
+        } catch {
+          updatedCuts[i] = { ...updatedCuts[i], imageStatus: "done", imageProgress: 100 };
+        }
+        setCutStates([...updatedCuts]);
+        setRunningDetail(`이미지 생성 중... (${i + 1}/${updatedCuts.length})`);
       }
 
-      // Fetch all image assets
+      // Collect all image assets
       const assets: AssetInfo[] = [];
       for (const shot of shotsData) {
         try {
@@ -337,18 +434,54 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
   const runVideos = async () => {
     try {
       setStage("videos_running");
-      const jobs: string[] = [];
-      for (const shot of shotsData) {
+      setGeneratingPhase("videos");
+
+      const updatedCuts: CutState[] = cutStates.map(c => ({ ...c, videoStatus: "pending" as CutStatus, videoProgress: 0 }));
+      setCutStates(updatedCuts);
+
+      for (let i = 0; i < updatedCuts.length; i++) {
         if (abortRef.current) throw new Error("중단됨");
-        const vj = await api(`/api/projects/${projectId}/shots/${shot.id}/video/generate`, {
+        const cut = updatedCuts[i];
+
+        updatedCuts[i] = { ...cut, videoStatus: "generating" };
+        setCutStates([...updatedCuts]);
+
+        const vj = await api(`/api/projects/${projectId}/shots/${cut.shotId}/video/generate`, {
           method: "POST", body: JSON.stringify({ mode: "image_to_video", num_variants: 1 }),
         });
-        jobs.push(vj.id);
-      }
-      for (let i = 0; i < jobs.length; i++) {
-        if (abortRef.current) throw new Error("중단됨");
-        setRunningDetail(`비디오 생성 중... (${i + 1}/${jobs.length})`);
-        await pollJob(jobs[i], 600);
+
+        const start = Date.now();
+        while (true) {
+          if (abortRef.current) throw new Error("중단됨");
+          await new Promise((r) => setTimeout(r, 3000));
+          const job = await api(`/api/jobs/${vj.id}`);
+          if (job.progress > updatedCuts[i].videoProgress) {
+            updatedCuts[i] = { ...updatedCuts[i], videoProgress: job.progress };
+            setCutStates([...updatedCuts]);
+          }
+          if (job.status === "completed") break;
+          if (job.status === "failed") throw new Error(job.error_message || `Cut ${i + 1} 비디오 실패`);
+          if (Date.now() - start > 600000) throw new Error("비디오 생성 시간 초과");
+        }
+
+        // Fetch video URL
+        try {
+          const res = await api(`/api/projects/${projectId}/shots/${cut.shotId}/video/assets`);
+          const vid = (res.assets || []).find((a: AssetInfo) => a.asset_type === "video" && a.status === "ready");
+          if (vid) {
+            let url = vid.url;
+            if (!url) {
+              try { const u = await api(`/api/projects/${projectId}/assets/${vid.id}/url`); url = u.url; } catch { /* skip */ }
+            }
+            updatedCuts[i] = { ...updatedCuts[i], videoUrl: url, videoStatus: "done", videoProgress: 100 };
+          } else {
+            updatedCuts[i] = { ...updatedCuts[i], videoStatus: "done", videoProgress: 100 };
+          }
+        } catch {
+          updatedCuts[i] = { ...updatedCuts[i], videoStatus: "done", videoProgress: 100 };
+        }
+        setCutStates([...updatedCuts]);
+        setRunningDetail(`비디오 생성 중... (${i + 1}/${updatedCuts.length})`);
       }
 
       const assets: AssetInfo[] = [];
@@ -676,16 +809,117 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
           </div>
 
           <ReviewActions
-            onApprove={runImages}
+            onApprove={runStoryPrompts}
             onRegenerate={runStructure}
-            approveLabel="승인 → 이미지 생성으로"
+            approveLabel="승인 → 프롬프트 생성 & 이미지 생성으로"
           />
         </div>
       )}
 
-      {/* ═══ Images Running ═══ */}
+      {/* ═══ Story Prompts Running ═══ */}
+      {stage === "prompts_running" && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 px-5 py-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-2 border-amber-400/30" />
+                <div className="absolute inset-0 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-center">
+                <h3 className="text-lg font-bold text-amber-300">AI가 프롬프트를 만들고 있어요</h3>
+                <p className="text-sm text-neutral-400 mt-1">
+                  전체 스토리를 분석하여 각 컷의 이미지 프롬프트를 생성합니다
+                </p>
+                <p className="text-xs text-neutral-500 mt-2">
+                  캐릭터 일관성, 색감 연속성, 조명 방향까지 고려합니다
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-amber-400/80">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                {runningDetail}
+              </div>
+            </div>
+          </div>
+
+          {/* Preview of what will be generated */}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+            {shotsData.map((shot, i) => (
+              <div key={shot.id} className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2">
+                <div className="aspect-[9/16] bg-neutral-800/50 rounded flex items-center justify-center mb-1">
+                  <span className="text-xs text-neutral-600">Cut {i + 1}</span>
+                </div>
+                <p className="text-[9px] text-neutral-500 line-clamp-2">
+                  {shot.description || shot.subject || `Shot ${i + 1}`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Images Running — real-time cut preview ═══ */}
       {stage === "images_running" && (
-        <RunningSpinner message="이미지를 생성하고 있어요" detail={runningDetail} />
+        <div className="space-y-4">
+          <div className="rounded-xl border border-violet-800/40 bg-violet-950/10 px-5 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                <span className="text-sm font-semibold text-violet-300">이미지 생성 중</span>
+              </div>
+              <span className="text-xs text-neutral-500">{runningDetail}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-neutral-800">
+              <div
+                className="h-full rounded-full bg-violet-500 transition-all duration-500"
+                style={{ width: `${cutStates.length > 0 ? (cutStates.filter(c => c.imageStatus === "done").length / cutStates.length) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {cutStates.map((cut, i) => (
+              <div key={cut.shotId} className={`rounded-xl border overflow-hidden transition-all ${
+                cut.imageStatus === "generating" ? "border-violet-500/60 ring-1 ring-violet-500/20" :
+                cut.imageStatus === "done" ? "border-emerald-700/40" : "border-neutral-800"
+              }`}>
+                <div className="aspect-[9/16] bg-neutral-900 relative">
+                  {cut.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={cut.imageUrl} alt={`Cut ${i + 1}`} className="w-full h-full object-cover" />
+                  ) : cut.imageStatus === "generating" ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                      <div className="w-10 h-10 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs text-violet-300">{cut.imageProgress}%</span>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-xs text-neutral-600">Cut {i + 1}</span>
+                    </div>
+                  )}
+
+                  {/* Status badge */}
+                  <div className="absolute top-2 left-2">
+                    <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-bold ${
+                      cut.imageStatus === "done" ? "bg-emerald-600/80 text-white" :
+                      cut.imageStatus === "generating" ? "bg-violet-600/80 text-white animate-pulse" :
+                      "bg-neutral-800/80 text-neutral-500"
+                    }`}>
+                      {cut.imageStatus === "done" ? "✓" : cut.imageStatus === "generating" ? "..." : `${i + 1}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="px-2 py-1.5">
+                  <p className="text-[10px] text-neutral-400 line-clamp-2">{cut.narration}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* ═══ Images Review ═══ */}
@@ -737,9 +971,70 @@ export default function AutoPilot({ projectId, onComplete, onSwitchToExpert }: A
         </div>
       )}
 
-      {/* ═══ Videos Running ═══ */}
+      {/* ═══ Videos Running — real-time cut preview ═══ */}
       {stage === "videos_running" && (
-        <RunningSpinner message="비디오 클립을 생성하고 있어요" detail={runningDetail} />
+        <div className="space-y-4">
+          <div className="rounded-xl border border-blue-800/40 bg-blue-950/10 px-5 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                <span className="text-sm font-semibold text-blue-300">비디오 생성 중</span>
+              </div>
+              <span className="text-xs text-neutral-500">{runningDetail}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-neutral-800">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                style={{ width: `${cutStates.length > 0 ? (cutStates.filter(c => c.videoStatus === "done").length / cutStates.length) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {cutStates.map((cut, i) => (
+              <div key={cut.shotId} className={`rounded-xl border overflow-hidden transition-all ${
+                cut.videoStatus === "generating" ? "border-blue-500/60 ring-1 ring-blue-500/20" :
+                cut.videoStatus === "done" ? "border-emerald-700/40" : "border-neutral-800"
+              }`}>
+                <div className="aspect-video bg-neutral-900 relative">
+                  {cut.videoUrl ? (
+                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                    <video src={cut.videoUrl} controls className="w-full h-full bg-black" preload="metadata" />
+                  ) : cut.imageUrl ? (
+                    <div className="relative w-full h-full">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={cut.imageUrl} alt={`Cut ${i + 1}`} className="w-full h-full object-cover" />
+                      {cut.videoStatus === "generating" && (
+                        <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
+                          <div className="w-12 h-12 border-3 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                          <span className="text-sm font-bold text-blue-300">{cut.videoProgress}%</span>
+                          <span className="text-[10px] text-neutral-400">영상 변환 중...</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-neutral-600 text-xs">
+                      Cut {i + 1}
+                    </div>
+                  )}
+
+                  <div className="absolute top-2 left-2">
+                    <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                      cut.videoStatus === "done" ? "bg-emerald-600/90 text-white" :
+                      cut.videoStatus === "generating" ? "bg-blue-600/90 text-white" :
+                      "bg-neutral-800/90 text-neutral-400"
+                    }`}>
+                      Cut {i + 1} {cut.videoStatus === "done" ? "✓" : cut.videoStatus === "generating" ? `${cut.videoProgress}%` : "대기"}
+                    </span>
+                  </div>
+                </div>
+                <div className="px-3 py-2">
+                  <p className="text-xs text-neutral-400 line-clamp-1">{cut.narration}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* ═══ Videos Review ═══ */}

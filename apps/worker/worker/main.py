@@ -142,6 +142,9 @@ def _build_handlers() -> dict[str, callable]:
     from worker.handlers.render import (
         handle_render_final,
     )
+    from worker.handlers.story_prompts import (
+        handle_story_prompts,
+    )
 
     return {
         "demo": handle_demo,
@@ -153,6 +156,7 @@ def _build_handlers() -> dict[str, callable]:
         "shot_regenerate": handle_shot_regenerate,
         "frame_plan": handle_frame_plan,
         "frame_regenerate": handle_frame_regenerate,
+        "story_prompts": handle_story_prompts,
         "image_generate": handle_image_generate,
         "video_generate": handle_video_generate,
         "tts_generate": handle_tts_generate,

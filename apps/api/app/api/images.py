@@ -53,7 +53,49 @@ class AssetListResponse(BaseModel):
     total: int
 
 
+class StoryPromptsRequest(BaseModel):
+    script_version_id: str
+
+
 # ── Endpoints ─────────────────────────────────────────
+
+
+@router.post(
+    "/{project_id}/story-prompts/generate",
+    response_model=JobResponse,
+    status_code=201,
+)
+async def generate_story_prompts(
+    project_id: UUID,
+    body: StoryPromptsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate rich visual prompts for ALL frames based on full story context.
+
+    This step should run BEFORE image generation to ensure high-quality,
+    story-coherent prompts with visual continuity across all cuts.
+    """
+    job = Job(
+        job_type="story_prompts",
+        project_id=project_id,
+        params={
+            "project_id": str(project_id),
+            "script_version_id": body.script_version_id,
+        },
+        max_retries=1,
+        status="queued",
+    )
+    db.add(job)
+    await db.flush()
+    await db.refresh(job)
+
+    pool = await get_queue()
+    arq_job = await pool.enqueue_job("run_job", str(job.id))
+    job.arq_job_id = arq_job.job_id
+    await db.flush()
+    await db.refresh(job)
+
+    return job
 
 
 @router.post(

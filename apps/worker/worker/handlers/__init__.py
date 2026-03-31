@@ -8,6 +8,7 @@ from worker.handlers.tts import handle_tts_generate
 from worker.handlers.subtitle import handle_subtitle_generate
 from worker.handlers.timeline import handle_timeline_compose
 from worker.handlers.render import handle_render_final
+from worker.handlers.story_prompts import handle_story_prompts
 
 __all__ = [
     "handle_script_generate",
@@ -24,4 +25,5 @@ __all__ = [
     "handle_subtitle_generate",
     "handle_timeline_compose",
     "handle_render_final",
+    "handle_story_prompts",
 ]

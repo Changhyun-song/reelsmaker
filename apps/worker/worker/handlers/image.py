@@ -62,11 +62,22 @@ async def handle_image_generate(
     ensure_bucket()
     await _update_job_progress(job_id, 5)
 
-    # 1. Compile prompt
+    # 1. Compile prompt — use story-generated prompt if available, else compile from spec
     async with async_session_factory() as session:
+        frame_check = (
+            await session.execute(select(FrameSpec).where(FrameSpec.id == fid))
+        ).scalar_one_or_none()
+        has_story_prompt = bool(frame_check and frame_check.visual_prompt)
         ctx = await build_compiler_context(pid, fid, session)
 
     compiled = compile_full(ctx)
+    if has_story_prompt and frame_check.visual_prompt:
+        compiled.detailed_prompt = frame_check.visual_prompt
+        compiled.concise_prompt = frame_check.visual_prompt[:200]
+        if frame_check.negative_prompt:
+            compiled.negative_prompt = frame_check.negative_prompt
+        logger.info("Using story-generated prompt for frame=%s", frame_id)
+
     next_ver = await _next_version(fid)
     await _update_job_progress(job_id, 15)
 

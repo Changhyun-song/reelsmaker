@@ -215,26 +215,52 @@ export default function CutInspector({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-neutral-800 flex items-center justify-between">
-        <div>
-          <h3 className="text-xs font-bold text-neutral-300">
-            컷 {cut.cutIndex + 1} 인스펙터
-          </h3>
-          <p className="text-[9px] text-neutral-600">
-            S{cut.sceneIndex + 1}.{cut.shotIndex + 1} · {cut.frameRole}
-          </p>
+      <div className="px-3 py-2 border-b border-neutral-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xs font-bold text-neutral-300">
+              컷 {cut.cutIndex + 1} 인스펙터
+            </h3>
+            <p className="text-[9px] text-neutral-600">
+              S{cut.sceneIndex + 1}.{cut.shotIndex + 1} · {cut.frameRole}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {hasChanges && (
+              <span className="text-[9px] text-amber-400">수정됨</span>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={!hasChanges || saving}
+              className="rounded-md bg-blue-600/20 border border-blue-700/40 px-2.5 py-1 text-[10px] font-medium text-blue-400 hover:bg-blue-600/30 transition disabled:opacity-40"
+            >
+              {saving ? "저장 중..." : "저장"}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          {hasChanges && (
-            <span className="text-[9px] text-amber-400">수정됨</span>
+        {/* Importance + manual review badges */}
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          <span className={`text-[8px] px-1.5 py-0.5 rounded font-medium ${
+            cut.importance === "key" ? "bg-violet-900/30 text-violet-400"
+              : cut.importance === "normal" ? "bg-blue-900/20 text-blue-400"
+                : "bg-neutral-800 text-neutral-500"
+          }`}>
+            {cut.importance === "key" ? "핵심 컷" : cut.importance === "normal" ? "일반 컷" : "연결 컷"}
+          </span>
+          {cut.needsManualReview ? (
+            <span className="text-[8px] px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 font-medium">
+              수동 검토 권장
+            </span>
+          ) : (
+            <span className="text-[8px] px-1.5 py-0.5 rounded bg-emerald-900/20 text-emerald-500 font-medium">
+              자동 결과 사용 가능
+            </span>
           )}
-          <button
-            onClick={handleSave}
-            disabled={!hasChanges || saving}
-            className="rounded-md bg-blue-600/20 border border-blue-700/40 px-2.5 py-1 text-[10px] font-medium text-blue-400 hover:bg-blue-600/30 transition disabled:opacity-40"
-          >
-            {saving ? "저장 중..." : "저장"}
-          </button>
+          {cut.importanceReasons.map(r => (
+            <span key={r} className="text-[7px] px-1 py-0.5 rounded bg-neutral-800 text-neutral-500">
+              {r}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -385,7 +411,11 @@ export default function CutInspector({
           )}
           <button
             onClick={() => onRegenerateImage(frameDetail.id)}
-            className="mt-2 w-full rounded-md bg-neutral-800 border border-neutral-700/50 py-1.5 text-[10px] font-medium text-neutral-400 hover:text-neutral-200 transition"
+            className={`mt-2 w-full rounded-md py-1.5 text-[10px] font-medium transition ${
+              cut.needsManualReview
+                ? "bg-blue-600/20 border border-blue-700/40 text-blue-400 hover:bg-blue-600/30"
+                : "bg-neutral-800 border border-neutral-700/50 text-neutral-400 hover:text-neutral-200"
+            }`}
           >
             이미지 재생성
           </button>

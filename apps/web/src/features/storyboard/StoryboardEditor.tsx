@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { apiUrl } from "@/lib/api";
 import type { SceneData, ShotData, FrameData, AssetData } from "@/lib/types";
-import CutListPanel, { type CutItem } from "./CutListPanel";
+import CutListPanel, { type CutItem, type ShotImportance } from "./CutListPanel";
 import CutInspector, {
   type FrameDetail,
   type ShotDetail,
@@ -20,7 +20,7 @@ interface StoryboardEditorProps {
   frames: FrameData[];
 }
 
-type FilterMode = "all" | "key_cuts" | "no_image" | "needs_review";
+type FilterMode = "all" | "key_cuts" | "no_image" | "needs_review" | "manual_review";
 
 interface BatchJob {
   frameId: string;
@@ -40,16 +40,88 @@ async function api(path: string, opts?: RequestInit) {
   return res.json();
 }
 
-/* ── Key cut detection ──────────────────────────────── */
+/* ── Shot importance classification ─────────────────── */
 
-function isKeyCut(cut: CutItem, allCuts: CutItem[]): boolean {
-  const sceneCuts = allCuts.filter(c => c.sceneIndex === cut.sceneIndex);
-  if (sceneCuts.length === 0) return false;
-  const first = sceneCuts[0];
-  const last = sceneCuts[sceneCuts.length - 1];
-  if (cut.cutIndex === first.cutIndex || cut.cutIndex === last.cutIndex) return true;
-  if (cut.frameRole === "start" && cut.shotIndex === 0) return true;
-  return false;
+const EMOTION_PEAK_KEYWORDS = [
+  "dramatic", "intense", "climax", "reveal", "shock", "surprise",
+  "emotional", "cry", "scream", "rage", "joy", "explosion",
+  "절정", "클라이맥스", "감동", "충격", "반전", "눈물",
+  "분노", "환희", "폭발", "비명",
+];
+
+const ACTION_PEAK_KEYWORDS = [
+  "fight", "chase", "crash", "explosion", "battle", "run",
+  "jump", "attack", "escape", "collision", "transform",
+  "전투", "추격", "폭발", "싸움", "도주", "변신", "충돌",
+];
+
+const CLOSE_UP_TYPES = [
+  "close-up", "close_up", "closeup", "extreme_close", "extreme close",
+  "클로즈업", "익스트림", "clo",
+];
+
+interface ClassificationResult {
+  importance: ShotImportance;
+  reasons: string[];
+  needsManualReview: boolean;
+}
+
+function classifyCut(
+  cut: { sceneIndex: number; shotIndex: number; frameRole: string },
+  shot: ShotData | undefined,
+  allSceneCuts: { sceneIndex: number; shotIndex: number }[],
+): ClassificationResult {
+  const reasons: string[] = [];
+
+  const sceneCuts = allSceneCuts.filter(c => c.sceneIndex === cut.sceneIndex);
+  const isFirst = sceneCuts.length > 0 && cut.shotIndex <= (sceneCuts[0]?.shotIndex ?? 0);
+  const isLast = sceneCuts.length > 0 && cut.shotIndex >= (sceneCuts[sceneCuts.length - 1]?.shotIndex ?? 0);
+
+  if (isFirst) reasons.push("씬 오프너");
+  if (isLast && sceneCuts.length > 1) reasons.push("씬 엔딩");
+
+  const desc = (shot?.description || "").toLowerCase();
+  const emotion = (shot?.emotion || "").toLowerCase();
+  const purpose = (shot?.purpose || "").toLowerCase();
+  const shotType = (shot?.shot_type || "").toLowerCase();
+  const framing = (shot?.camera_framing || "").toLowerCase();
+  const narration = (shot?.narration_segment || "").toLowerCase();
+
+  if (CLOSE_UP_TYPES.some(kw => shotType.includes(kw) || framing.includes(kw))) {
+    reasons.push("클로즈업/히어로");
+  }
+
+  const allText = `${desc} ${emotion} ${purpose} ${narration}`;
+  if (EMOTION_PEAK_KEYWORDS.some(kw => allText.includes(kw))) {
+    reasons.push("감정 절정");
+  }
+  if (ACTION_PEAK_KEYWORDS.some(kw => allText.includes(kw))) {
+    reasons.push("액션 피크");
+  }
+
+  if (purpose.includes("reveal") || purpose.includes("intro") || desc.includes("first appear") || desc.includes("첫 등장")) {
+    reasons.push("캐릭터 등장");
+  }
+
+  if (purpose.includes("hero") || purpose.includes("iconic") || purpose.includes("signature")) {
+    reasons.push("히어로 샷");
+  }
+
+  let importance: ShotImportance;
+  if (reasons.length >= 2 || reasons.some(r => ["씬 오프너", "감정 절정", "액션 피크", "캐릭터 등장", "히어로 샷"].includes(r))) {
+    importance = "key";
+  } else if (reasons.length === 1) {
+    importance = "normal";
+  } else {
+    const isMidScene = !isFirst && !isLast;
+    const isTransitionShot = shotType.includes("transition") || shotType.includes("establishing") || shotType.includes("cutaway");
+    importance = (isMidScene && isTransitionShot) ? "filler" : "normal";
+  }
+
+  const needsManualReview = importance === "key" ||
+    (importance === "normal" && reasons.length > 0);
+
+  return { importance, reasons, needsManualReview };
 }
 
 /* ── Batch progress bar ─────────────────────────────── */
@@ -70,9 +142,7 @@ function BatchProgress({ jobs, onCancel }: { jobs: BatchJob[]; onCancel: () => v
             일괄 생성 진행 중 ({done + errored}/{total})
           </span>
         </div>
-        <button onClick={onCancel} className="text-[9px] text-neutral-500 hover:text-neutral-300">
-          중단
-        </button>
+        <button onClick={onCancel} className="text-[9px] text-neutral-500 hover:text-neutral-300">중단</button>
       </div>
       <div className="h-1.5 rounded-full bg-neutral-800 overflow-hidden">
         <div className="h-full flex">
@@ -101,27 +171,32 @@ function BatchProgress({ jobs, onCancel }: { jobs: BatchJob[]; onCancel: () => v
 
 /* ── Workflow guide ──────────────────────────────────── */
 
-function WorkflowGuide({ onClose }: { onClose: () => void }) {
+function WorkflowGuide({ onClose, manualRatio }: { onClose: () => void; manualRatio: number }) {
   const steps = [
     { num: 1, label: "Continuity Bible 저장", desc: "스타일 섹션에서 전체 영상 규칙을 먼저 설정하세요" },
-    { num: 2, label: "전체 프레임 자동 생성", desc: "아래 '전체 이미지 생성' 버튼으로 한번에 실행" },
-    { num: 3, label: "핵심 컷만 검토", desc: "'핵심 컷' 필터로 중요한 장면만 빠르게 확인" },
-    { num: 4, label: "이상한 컷만 재생성", desc: "인스펙터에서 프롬프트 수정 후 개별 재생성" },
-    { num: 5, label: "승인 후 비디오 생성", desc: "이미지 승인 → 비디오 단계로 진행" },
+    { num: 2, label: "전체 이미지 자동 생성", desc: "'전체 이미지 생성' 버튼으로 한번에 실행" },
+    { num: 3, label: "핵심 컷만 검토", desc: "핵심 컷 필터 → 수동 검토 권장 컷만 확인" },
+    { num: 4, label: "문제 컷만 재생성", desc: "프롬프트 수정 후 개별 재생성 (전체의 20~30%)" },
+    { num: 5, label: "승인 → 비디오", desc: "이미지 승인 후 비디오 단계로 진행" },
   ];
 
   return (
     <div className="rounded-xl border border-blue-800/20 bg-blue-950/5 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-blue-400 text-sm">💡</span>
           <span className="text-xs font-bold text-blue-400">권장 워크플로</span>
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+            manualRatio <= 30 ? "bg-emerald-900/30 text-emerald-400" : "bg-amber-900/30 text-amber-400"
+          }`}>
+            수동 검토 권장 {manualRatio}%
+          </span>
         </div>
         <button onClick={onClose} className="text-neutral-600 hover:text-neutral-400 text-xs">✕</button>
       </div>
       <p className="text-[10px] text-neutral-500">
         이 화면은 모든 프레임을 수동으로 작성하는 곳이 아닙니다.
-        자동 생성된 결과를 검토하고, 문제가 있는 컷만 수정하세요.
+        자동 생성 결과를 검토하고, <strong className="text-neutral-400">수동 검토가 권장된 핵심 컷</strong>만 수정하세요.
+        나머지는 자동 결과를 그대로 사용해도 충분합니다.
       </p>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {steps.map(s => (
@@ -135,6 +210,41 @@ function WorkflowGuide({ onClose }: { onClose: () => void }) {
             <p className="text-[9px] text-neutral-500 leading-snug">{s.desc}</p>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Review ratio meter ─────────────────────────────── */
+
+function ReviewRatioMeter({ total, keyCount, normalCount, fillerCount, manualCount }: {
+  total: number; keyCount: number; normalCount: number; fillerCount: number; manualCount: number;
+}) {
+  if (total === 0) return null;
+  const pctKey = (keyCount / total) * 100;
+  const pctNormal = (normalCount / total) * 100;
+  const pctFiller = (fillerCount / total) * 100;
+  const manualPct = Math.round((manualCount / total) * 100);
+
+  return (
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[9px] font-bold text-neutral-500">Shot 중요도 분포</span>
+        <span className={`text-[9px] font-medium ${
+          manualPct <= 30 ? "text-emerald-400" : manualPct <= 50 ? "text-amber-400" : "text-red-400"
+        }`}>
+          수동 보정 {manualPct}% {manualPct <= 30 ? "(최적)" : manualPct <= 50 ? "(적정)" : "(과다 — 권장 20~30%)"}
+        </span>
+      </div>
+      <div className="h-2 rounded-full bg-neutral-800 overflow-hidden flex">
+        <div className="bg-violet-500 transition-all" style={{ width: `${pctKey}%` }} title={`핵심 ${keyCount}`} />
+        <div className="bg-blue-500 transition-all" style={{ width: `${pctNormal}%` }} title={`일반 ${normalCount}`} />
+        <div className="bg-neutral-600 transition-all" style={{ width: `${pctFiller}%` }} title={`연결 ${fillerCount}`} />
+      </div>
+      <div className="flex items-center gap-3 text-[8px]">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" />핵심 {keyCount}</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" />일반 {normalCount}</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-neutral-600" />연결 {fillerCount}</span>
       </div>
     </div>
   );
@@ -158,11 +268,28 @@ export default function StoryboardEditor({
   const [batchRunning, setBatchRunning] = useState(false);
   const batchCancelRef = useState({ cancelled: false })[0];
 
-  // Build flat cut list
+  // Build shot lookup
+  const shotMap = useMemo(() => {
+    const map = new Map<string, ShotData>();
+    for (const s of shots) map.set(s.id, s);
+    return map;
+  }, [shots]);
+
+  // Build flat cut list with importance classification
   const allCuts: CutItem[] = useMemo(() => {
     const result: CutItem[] = [];
     let cutIdx = 0;
     const sortedScenes = [...scenes].sort((a, b) => a.order_index - b.order_index);
+
+    // Pre-collect all scene/shot indices for scene boundary detection
+    const allSceneShotIndices: { sceneIndex: number; shotIndex: number }[] = [];
+    for (const scene of sortedScenes) {
+      const sceneShots = shots.filter(s => s.scene_id === scene.id).sort((a, b) => a.order_index - b.order_index);
+      for (const shot of sceneShots) {
+        allSceneShotIndices.push({ sceneIndex: scene.order_index, shotIndex: shot.order_index });
+      }
+    }
+
     for (const scene of sortedScenes) {
       const sceneShots = shots.filter(s => s.scene_id === scene.id).sort((a, b) => a.order_index - b.order_index);
       for (const shot of sceneShots) {
@@ -179,6 +306,13 @@ export default function StoryboardEditor({
           }
           const videoAssets = frameAssets.filter(a => a.asset_type === "video");
           const videoStatus: CutItem["videoStatus"] = videoAssets.some(a => a.status === "ready") ? "ready" : "none";
+
+          const classification = classifyCut(
+            { sceneIndex: scene.order_index, shotIndex: shot.order_index, frameRole: frame.frame_role || "start" },
+            shotMap.get(shot.id),
+            allSceneShotIndices,
+          );
+
           result.push({
             cutIndex: cutIdx++,
             frameId: frame.id,
@@ -192,19 +326,23 @@ export default function StoryboardEditor({
             videoStatus,
             hasPrompt: !!frame.visual_prompt,
             thumbnailUrl: selectedImage?.url || null,
+            importance: classification.importance,
+            importanceReasons: classification.reasons,
+            needsManualReview: classification.needsManualReview,
           });
         }
       }
     }
     return result;
-  }, [scenes, shots, frames, assets]);
+  }, [scenes, shots, frames, assets, shotMap]);
 
   // Filter cuts
   const cuts = useMemo(() => {
     if (filterMode === "all") return allCuts;
-    if (filterMode === "key_cuts") return allCuts.filter(c => isKeyCut(c, allCuts));
+    if (filterMode === "key_cuts") return allCuts.filter(c => c.importance === "key");
     if (filterMode === "no_image") return allCuts.filter(c => c.imageStatus === "none");
     if (filterMode === "needs_review") return allCuts.filter(c => c.imageStatus === "ready" || c.imageStatus === "rejected");
+    if (filterMode === "manual_review") return allCuts.filter(c => c.needsManualReview);
     return allCuts;
   }, [allCuts, filterMode]);
 
@@ -215,9 +353,14 @@ export default function StoryboardEditor({
     const approved = allCuts.filter(c => c.imageStatus === "approved").length;
     const noImage = allCuts.filter(c => c.imageStatus === "none").length;
     const withPrompt = allCuts.filter(c => c.hasPrompt).length;
-    const keyCuts = allCuts.filter(c => isKeyCut(c, allCuts)).length;
-    return { total, withImage, approved, noImage, withPrompt, keyCuts };
+    const keyCuts = allCuts.filter(c => c.importance === "key").length;
+    const normalCuts = allCuts.filter(c => c.importance === "normal").length;
+    const fillerCuts = allCuts.filter(c => c.importance === "filler").length;
+    const manualReview = allCuts.filter(c => c.needsManualReview).length;
+    return { total, withImage, approved, noImage, withPrompt, keyCuts, normalCuts, fillerCuts, manualReview };
   }, [allCuts]);
+
+  const manualRatio = stats.total > 0 ? Math.round((stats.manualReview / stats.total) * 100) : 0;
 
   // Load assets
   useEffect(() => {
@@ -301,7 +444,7 @@ export default function StoryboardEditor({
     } catch { /* handled in UI */ }
   }, [projectId]);
 
-  // ── Batch execution ──────────────────────────────
+  // Batch execution
   const runBatch = useCallback(async (targetCuts: CutItem[]) => {
     if (batchRunning || targetCuts.length === 0) return;
     setBatchRunning(true);
@@ -360,31 +503,43 @@ export default function StoryboardEditor({
     );
   }
 
+  const impStyle = selectedCut ? {
+    key: { badge: "bg-violet-900/40 text-violet-400 border-violet-700/30", label: "핵심 컷" },
+    normal: { badge: "bg-blue-900/30 text-blue-400 border-blue-800/30", label: "일반 컷" },
+    filler: { badge: "bg-neutral-800 text-neutral-500 border-neutral-700/30", label: "연결 컷" },
+  }[selectedCut.importance] : null;
+
   return (
     <div className="space-y-3">
       {/* Workflow guide */}
-      {showGuide ? <WorkflowGuide onClose={() => setShowGuide(false)} /> : null}
+      {showGuide ? <WorkflowGuide onClose={() => setShowGuide(false)} manualRatio={manualRatio} /> : null}
+
+      {/* Review ratio meter */}
+      <ReviewRatioMeter
+        total={stats.total}
+        keyCount={stats.keyCuts}
+        normalCount={stats.normalCuts}
+        fillerCount={stats.fillerCuts}
+        manualCount={stats.manualReview}
+      />
 
       {/* Action bar */}
       <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          {/* Stats */}
           <div className="flex items-center gap-4 text-[10px]">
             <span className="text-neutral-500">{stats.total}컷</span>
-            <span className="text-emerald-400">{stats.withImage} 이미지</span>
-            <span className="text-blue-400">{stats.approved} 승인</span>
+            <span className="text-violet-400">{stats.keyCuts} 핵심</span>
+            <span className="text-emerald-400">{stats.approved} 승인</span>
             <span className="text-neutral-600">{stats.noImage} 미생성</span>
-            <span className="text-neutral-500">{stats.withPrompt}/{stats.total} 프롬프트</span>
           </div>
 
-          {/* Batch action buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => runBatch(allCuts.filter(c => c.imageStatus === "none"))}
               disabled={batchRunning || stats.noImage === 0}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-[10px] font-medium text-white hover:bg-blue-500 transition disabled:opacity-40"
             >
-              미생성 컷 일괄 생성 ({stats.noImage})
+              미생성 일괄 생성 ({stats.noImage})
             </button>
             <button
               onClick={() => runBatch(allCuts)}
@@ -394,11 +549,11 @@ export default function StoryboardEditor({
               전체 이미지 생성
             </button>
             <button
-              onClick={() => runBatch(allCuts.filter(c => isKeyCut(c, allCuts) && c.imageStatus === "none"))}
+              onClick={() => runBatch(allCuts.filter(c => c.importance === "key" && c.imageStatus === "none"))}
               disabled={batchRunning}
-              className="rounded-md bg-neutral-800 border border-neutral-700/50 px-3 py-1.5 text-[10px] font-medium text-neutral-400 hover:text-neutral-200 transition disabled:opacity-40"
+              className="rounded-md bg-violet-600/20 border border-violet-700/40 px-3 py-1.5 text-[10px] font-medium text-violet-400 hover:bg-violet-600/30 transition disabled:opacity-40"
             >
-              핵심 컷만 생성 ({stats.keyCuts})
+              핵심 컷만 ({stats.keyCuts})
             </button>
           </div>
         </div>
@@ -407,16 +562,18 @@ export default function StoryboardEditor({
         <div className="flex items-center gap-1.5 mt-2">
           {([
             ["all", `전체 (${allCuts.length})`],
-            ["key_cuts", `핵심 컷 (${stats.keyCuts})`],
+            ["key_cuts", `핵심 (${stats.keyCuts})`],
+            ["manual_review", `검토 권장 (${stats.manualReview})`],
             ["no_image", `미생성 (${stats.noImage})`],
-            ["needs_review", `검토 필요 (${allCuts.filter(c => c.imageStatus === "ready" || c.imageStatus === "rejected").length})`],
+            ["needs_review", `이미지 확인 (${allCuts.filter(c => c.imageStatus === "ready" || c.imageStatus === "rejected").length})`],
           ] as [FilterMode, string][]).map(([mode, label]) => (
             <button
               key={mode}
               onClick={() => { setFilterMode(mode); setSelectedIndex(0); }}
               className={`rounded-md px-2.5 py-1 text-[9px] font-medium border transition ${
                 filterMode === mode
-                  ? "bg-blue-600/20 border-blue-700/40 text-blue-400"
+                  ? mode === "key_cuts" ? "bg-violet-600/20 border-violet-700/40 text-violet-400"
+                    : "bg-blue-600/20 border-blue-700/40 text-blue-400"
                   : "bg-transparent border-neutral-800 text-neutral-500 hover:text-neutral-300"
               }`}
             >
@@ -461,9 +618,14 @@ export default function StoryboardEditor({
                     <span className="text-xs text-neutral-400">
                       Scene {selectedCut.sceneIndex + 1} · Shot {selectedCut.shotIndex + 1}
                     </span>
-                    {isKeyCut(selectedCut, allCuts) ? (
-                      <span className="text-[8px] px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-400 font-medium">
-                        핵심 컷
+                    {impStyle ? (
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded border font-medium ${impStyle.badge}`}>
+                        {impStyle.label}
+                      </span>
+                    ) : null}
+                    {selectedCut.needsManualReview ? (
+                      <span className="text-[8px] px-1.5 py-0.5 rounded bg-orange-900/30 text-orange-400 border border-orange-800/30 font-medium">
+                        수동 검토 권장
                       </span>
                     ) : null}
                   </div>
@@ -471,6 +633,17 @@ export default function StoryboardEditor({
                     {(selectedCut.durationMs / 1000).toFixed(1)}s
                   </span>
                 </div>
+
+                {/* Importance reasons */}
+                {selectedCut.importanceReasons.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {selectedCut.importanceReasons.map(r => (
+                      <span key={r} className="text-[8px] px-1.5 py-0.5 rounded bg-violet-900/20 text-violet-400/80 font-medium">
+                        {r}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div className="rounded-lg border border-neutral-800 bg-neutral-900 overflow-hidden">
                   {selectedCut.thumbnailUrl ? (

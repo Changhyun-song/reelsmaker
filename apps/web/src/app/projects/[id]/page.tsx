@@ -11,231 +11,35 @@ import WorkspaceLayout, {
   WORKSPACE_STEPS,
 } from "./workspace-layout";
 
-/* ── Types ─────────────────────────────────────────── */
+import type {
+  Project,
+  ScriptSection,
+  ScriptPlan,
+  ScriptVersion,
+  SceneData,
+  ShotData,
+  FrameData,
+  AssetData,
+  SubtitleSegmentData,
+  SubtitleTrackData,
+  TimelineSummaryData,
+  TimelineListItem,
+  Job,
+  QAResultData,
+  QASummaryData,
+  CompiledPromptData,
+  StylePreset,
+} from "@/lib/types";
+import { FORMAT_OPTIONS, TONE_SUGGESTIONS } from "@/lib/types";
 
-interface Project {
-  id: string;
-  title: string;
-  description: string | null;
-  status: string;
-  active_style_preset_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ScriptSection {
-  title: string;
-  description: string;
-  narration: string;
-  visual_notes: string;
-  duration_sec: number;
-}
-
-interface ScriptPlan {
-  title: string;
-  summary: string;
-  hook: string;
-  narrative_flow: string[];
-  sections: ScriptSection[];
-  ending_cta: string;
-  narration_draft: string;
-  estimated_duration_sec: number;
-}
-
-interface ScriptVersion {
-  id: string;
-  project_id: string;
-  version: number;
-  status: string;
-  raw_text: string | null;
-  input_params: Record<string, unknown> | null;
-  plan_json: ScriptPlan | null;
-  parent_version_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface SceneData {
-  id: string;
-  script_version_id: string;
-  order_index: number;
-  title: string | null;
-  description: string | null;
-  setting: string | null;
-  mood: string | null;
-  duration_estimate_sec: number | null;
-  status: string;
-  purpose: string | null;
-  narration_text: string | null;
-  emotional_tone: string | null;
-  visual_intent: string | null;
-  transition_hint: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ShotData {
-  id: string;
-  scene_id: string;
-  order_index: number;
-  shot_type: string | null;
-  description: string | null;
-  camera_movement: string | null;
-  duration_sec: number | null;
-  status: string;
-  purpose: string | null;
-  camera_framing: string | null;
-  subject: string | null;
-  environment: string | null;
-  emotion: string | null;
-  narration_segment: string | null;
-  transition_in: string | null;
-  transition_out: string | null;
-  asset_strategy: string | null;
-}
-
-interface FrameData {
-  id: string;
-  shot_id: string;
-  order_index: number;
-  frame_role: string | null;
-  composition: string | null;
-  subject_position: string | null;
-  camera_angle: string | null;
-  lens_feel: string | null;
-  lighting: string | null;
-  mood: string | null;
-  action_pose: string | null;
-  background_description: string | null;
-  continuity_notes: string | null;
-  forbidden_elements: string | null;
-  visual_prompt: string | null;
-  negative_prompt: string | null;
-  status: string;
-}
-
-interface AssetData {
-  id: string;
-  project_id: string;
-  parent_type: string;
-  parent_id: string;
-  asset_type: string;
-  storage_key: string | null;
-  filename: string | null;
-  mime_type: string | null;
-  file_size_bytes: number | null;
-  metadata_: Record<string, unknown> | null;
-  version: number;
-  status: string;
-  is_selected: boolean;
-  generation_batch: string | null;
-  quality_note: string | null;
-  created_at: string;
-  url: string | null;
-}
-
-interface SubtitleSegmentData {
-  index: number;
-  start_ms: number;
-  end_ms: number;
-  text: string;
-  shot_id: string | null;
-  speaker: string | null;
-}
-
-interface SubtitleTrackData {
-  id: string;
-  project_id: string;
-  script_version_id: string | null;
-  language: string;
-  format: string;
-  timing_source: string;
-  segments: SubtitleSegmentData[] | null;
-  style_settings: Record<string, unknown> | null;
-  content: string | null;
-  total_segments: number | null;
-  total_duration_ms: number | null;
-  asset_id: string | null;
-  status: string;
-  created_at: string;
-}
-
-interface TimelineSummaryData {
-  id: string;
-  status: string;
-  total_duration_ms: number;
-  total_shots: number;
-  shots_with_video: number;
-  shots_with_image_only: number;
-  shots_missing_visual: number;
-  shots_with_audio: number;
-  shots_missing_audio: number;
-  has_subtitle: boolean;
-  has_bgm: boolean;
-  warnings: string[];
-  created_at: string;
-}
-
-interface TimelineListItem {
-  id: string;
-  project_id: string;
-  script_version_id: string;
-  total_duration_ms: number | null;
-  status: string;
-  created_at: string;
-}
-
-interface Job {
-  id: string;
-  job_type: string;
-  status: string;
-  progress: number;
-  result: Record<string, unknown> | null;
-  error_message: string | null;
-  created_at: string;
-}
-
-interface QAResultData {
-  id: string;
-  project_id: string;
-  script_version_id: string | null;
-  scope: string;
-  target_type: string | null;
-  target_id: string | null;
-  check_type: string;
-  severity: string;
-  message: string;
-  details: Record<string, unknown> | null;
-  suggestion: string | null;
-  resolved: boolean;
-  source: string;
-  created_at: string;
-}
-
-interface QASummaryData {
-  total: number;
-  errors: number;
-  warnings: number;
-  infos: number;
-  by_check_type: Record<string, number>;
-  by_scope: Record<string, number>;
-  render_ready: boolean;
-  blocking_issues: QAResultData[];
-}
-
-/* ── Constants ─────────────────────────────────────── */
-
-const FORMAT_OPTIONS = [
-  { value: "youtube_short", label: "YouTube Shorts (<60s)" },
-  { value: "tiktok", label: "TikTok (<60s)" },
-  { value: "instagram_reel", label: "Instagram Reels (<90s)" },
-  { value: "youtube_standard", label: "YouTube Standard (2-10min)" },
-  { value: "explainer", label: "설명 영상 (1-5min)" },
-];
-
-const TONE_SUGGESTIONS = [
-  "감성적", "유머러스", "교육적", "진지한", "활기찬", "차분한", "미스터리", "동기부여",
-];
+import StudioPage from "@/features/studio/StudioPage";
+import StylePickerModal from "@/features/style/StylePickerModal";
+import VoicePicker from "@/features/voice/VoicePicker";
+import TimelineEditor from "@/features/timeline/TimelineEditor";
+import RenderPanel from "@/features/render/RenderPanel";
+import CostDashboard from "@/features/studio/CostDashboard";
+import Badge from "@/components/ui/badge";
+import Button from "@/components/ui/button";
 
 const SCENE_STATUS_STYLES: Record<string, string> = {
   drafted: "bg-neutral-800 text-neutral-300",
@@ -403,17 +207,6 @@ function ScriptPlanView({ plan }: { plan: ScriptPlan }) {
       </div>
     </div>
   );
-}
-
-/* ── Prompt Preview types ─────────────────────────── */
-
-interface CompiledPromptData {
-  concise_prompt: string;
-  detailed_prompt: string;
-  video_prompt: string;
-  negative_prompt: string;
-  continuity_notes: string;
-  provider_options: Record<string, unknown>;
 }
 
 /* ── Prompt Preview Modal ─────────────────────────── */
@@ -3101,6 +2894,13 @@ export default function ProjectDetailPage({
   const [language, setLanguage] = useState("ko");
   const [constraints, setConstraints] = useState("");
 
+  const [showStylePicker, setShowStylePicker] = useState(false);
+  const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const [allShots, setAllShots] = useState<ShotData[]>([]);
+  const [allFrames, setAllFrames] = useState<FrameData[]>([]);
+  const [allAssets, setAllAssets] = useState<AssetData[]>([]);
+
   const fetchProject = useCallback(async () => {
     try { const r = await fetch(apiUrl(`/api/projects/${projectId}`)); if (r.ok) setProject(await r.json()); } catch {}
   }, [projectId]);
@@ -3113,7 +2913,33 @@ export default function ProjectDetailPage({
   }, [projectId, activeVersion]);
 
   const fetchScenes = useCallback(async (vId: string) => {
-    try { const r = await fetch(apiUrl(`/api/projects/${projectId}/scripts/${vId}/scenes`)); if (r.ok) { setScenes((await r.json()).scenes); } } catch {}
+    try {
+      const r = await fetch(apiUrl(`/api/projects/${projectId}/scripts/${vId}/scenes`));
+      if (r.ok) {
+        const data = await r.json();
+        setScenes(data.scenes);
+        const shotsList: ShotData[] = [];
+        const framesList: FrameData[] = [];
+        for (const sc of data.scenes) {
+          try {
+            const sr = await fetch(apiUrl(`/api/projects/${projectId}/scenes/${sc.id}/shots`));
+            if (sr.ok) {
+              const sd = await sr.json();
+              const shots = sd.shots || [];
+              shotsList.push(...shots);
+              for (const shot of shots) {
+                try {
+                  const fr = await fetch(apiUrl(`/api/projects/${projectId}/shots/${shot.id}/frames`));
+                  if (fr.ok) { const fd = await fr.json(); framesList.push(...(fd.frame_specs || [])); }
+                } catch {}
+              }
+            }
+          } catch {}
+        }
+        setAllShots(shotsList);
+        setAllFrames(framesList);
+      }
+    } catch {}
   }, [projectId]);
 
   const pollJob = useCallback(async (job: Job | null, setJob: (j: Job | null) => void, done: () => void) => {
@@ -3323,6 +3149,13 @@ export default function ProjectDetailPage({
               onNavigate={setSection}
               hasApiKey={hasApiKey}
             />
+          )}
+
+          {/* Cost summary */}
+          {(hasImages || hasVideos || hasVoices) && (
+            <div className="border-t border-neutral-800 pt-4">
+              <CostDashboard projectId={projectId} />
+            </div>
           )}
         </div>
       )}
@@ -3546,28 +3379,71 @@ export default function ProjectDetailPage({
 
       {/* ═══ Style & Character ═══ */}
       {section === "style" && (
-        <StyleCharacterPanel
-          projectId={projectId}
-          activeStylePresetId={project.active_style_preset_id}
-          onActiveStyleChange={(id) => {
-            setProject((prev) =>
-              prev ? { ...prev, active_style_preset_id: id } : prev,
-            );
-          }}
-        />
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold">스타일 설정</h2>
+              <p className="text-sm text-neutral-400 mt-1">영상의 비주얼 스타일을 선택합니다.</p>
+            </div>
+            <Button onClick={() => setShowStylePicker(true)}>
+              스타일 선택
+            </Button>
+          </div>
+          <StyleCharacterPanel
+            projectId={projectId}
+            activeStylePresetId={project.active_style_preset_id}
+            onActiveStyleChange={(id) => {
+              setProject((prev) =>
+                prev ? { ...prev, active_style_preset_id: id } : prev,
+              );
+            }}
+          />
+          <StylePickerModal
+            open={showStylePicker}
+            onClose={() => setShowStylePicker(false)}
+            projectId={projectId}
+            activeStyleId={project.active_style_preset_id}
+            onSelect={(preset) => {
+              setProject((prev) =>
+                prev ? { ...prev, active_style_preset_id: preset.id } : prev,
+              );
+            }}
+          />
+        </>
       )}
 
-      {/* ═══ Images ═══ */}
+      {/* ═══ Images (Studio) ═══ */}
       {section === "images" && (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">이미지 생성</h2>
-            <p className="text-sm text-neutral-400 mt-1">
-              각 Shot의 Frame Spec 기반으로 이미지를 생성합니다.
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">AI 스튜디오</h2>
+              <p className="text-sm text-neutral-400 mt-1">
+                컷별 이미지/비디오 실시간 생성 · 진행률 확인
+              </p>
+            </div>
+            {allShots.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setShowVoicePicker(true)}>
+                  보이스 선택
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowStylePicker(true)}>
+                  스타일
+                </Button>
+              </div>
+            )}
           </div>
           {!hasScenes ? (
             <LockedSection message="Scene/Shot 구조를 먼저 생성하세요." target="structure" onNavigate={setSection} />
+          ) : allShots.length > 0 && activeVersion ? (
+            <StudioPage
+              projectId={projectId}
+              scenes={scenes}
+              shots={allShots}
+              frames={allFrames}
+              versionId={activeVersion.id}
+              onComplete={() => fetchProgress()}
+            />
           ) : (
             <>
               <div className="rounded-lg border border-blue-900/40 bg-blue-950/20 p-4 space-y-1">
@@ -3596,6 +3472,25 @@ export default function ProjectDetailPage({
               </div>
             </>
           )}
+
+          <VoicePicker
+            open={showVoicePicker}
+            onClose={() => setShowVoicePicker(false)}
+            projectId={projectId}
+            selectedVoiceId={selectedVoiceId}
+            onSelect={(v) => setSelectedVoiceId(v.id)}
+          />
+          <StylePickerModal
+            open={showStylePicker}
+            onClose={() => setShowStylePicker(false)}
+            projectId={projectId}
+            activeStyleId={project.active_style_preset_id}
+            onSelect={(preset) => {
+              setProject((prev) =>
+                prev ? { ...prev, active_style_preset_id: preset.id } : prev,
+              );
+            }}
+          />
         </div>
       )}
 
@@ -3644,16 +3539,30 @@ export default function ProjectDetailPage({
       {/* ═══ TTS / Subtitle ═══ */}
       {section === "tts-subtitle" && (
         <div className="space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">TTS / 자막</h2>
-            <p className="text-sm text-neutral-400 mt-1">
-              나레이션 음성과 자막 트랙을 생성합니다.
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">TTS / 자막</h2>
+              <p className="text-sm text-neutral-400 mt-1">
+                나레이션 음성과 자막 트랙을 생성합니다.
+              </p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setShowVoicePicker(true)}>
+              보이스 선택
+            </Button>
           </div>
           {!hasScenes ? (
             <LockedSection message="Scene/Shot 구조를 먼저 생성하세요." target="structure" onNavigate={setSection} />
           ) : (
             <>
+              {selectedVoiceId && (
+                <div className="rounded-lg border border-violet-900/40 bg-violet-950/20 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center text-xs font-bold text-white">V</div>
+                  <div>
+                    <p className="text-xs text-violet-300 font-medium">선택된 보이스</p>
+                    <p className="text-[11px] text-neutral-400">{selectedVoiceId}</p>
+                  </div>
+                </div>
+              )}
               <div className="rounded-lg border border-pink-900/40 bg-pink-950/20 p-4">
                 <p className="text-xs text-pink-300">
                   Shot별 TTS는 각 Shot 카드 안에서 개별 생성합니다.
@@ -3666,6 +3575,13 @@ export default function ProjectDetailPage({
                   Shot별 TTS 생성 → 구조 탭
                 </button>
               </div>
+              <VoicePicker
+                open={showVoicePicker}
+                onClose={() => setShowVoicePicker(false)}
+                projectId={projectId}
+                selectedVoiceId={selectedVoiceId}
+                onSelect={(v) => setSelectedVoiceId(v.id)}
+              />
 
               {activeVersion && (
                 <SubtitlePanel
@@ -3733,6 +3649,10 @@ export default function ProjectDetailPage({
       {section === "export" && (
         <div className="space-y-6">
           <ExportPanel projectId={projectId} />
+          <div className="border-t border-neutral-800 pt-6">
+            <h2 className="text-lg font-semibold mb-4">비용 분석</h2>
+            <CostDashboard projectId={projectId} />
+          </div>
         </div>
       )}
     </WorkspaceLayout>

@@ -142,7 +142,7 @@ async def _provider_stats(
         select(
             ProviderRun.provider,
             func.count().label("total"),
-            func.sum(case((ProviderRun.status == "success", 1), else_=0)).label("ok"),
+            func.sum(case((ProviderRun.status == "completed", 1), else_=0)).label("ok"),
             func.sum(case((ProviderRun.status == "failed", 1), else_=0)).label("fail"),
             func.avg(ProviderRun.latency_ms).label("avg_lat"),
             func.percentile_cont(0.95).within_group(ProviderRun.latency_ms).label("p95_lat"),
@@ -183,17 +183,25 @@ async def _token_totals(
     provider: str,
     project_id: UUID | None,
 ) -> tuple[int, int]:
-    """Sum input/output tokens from JSONB token_usage column."""
+    """Sum input/output tokens from JSONB token_usage column.
+
+    Handles both key conventions: ``input_tokens``/``output_tokens`` (new)
+    and ``input``/``output`` (legacy).
+    """
     q = (
         select(
             func.sum(
                 func.coalesce(
-                    ProviderRun.token_usage["input_tokens"].as_integer(), 0
+                    ProviderRun.token_usage["input_tokens"].as_integer(),
+                    ProviderRun.token_usage["input"].as_integer(),
+                    0,
                 )
             ).label("inp"),
             func.sum(
                 func.coalesce(
-                    ProviderRun.token_usage["output_tokens"].as_integer(), 0
+                    ProviderRun.token_usage["output_tokens"].as_integer(),
+                    ProviderRun.token_usage["output"].as_integer(),
+                    0,
                 )
             ).label("out"),
         )
@@ -218,7 +226,7 @@ async def _category_stats(
         select(
             ProviderRun.operation,
             func.count().label("total"),
-            func.sum(case((ProviderRun.status == "success", 1), else_=0)).label("ok"),
+            func.sum(case((ProviderRun.status == "completed", 1), else_=0)).label("ok"),
             func.sum(case((ProviderRun.status == "failed", 1), else_=0)).label("fail"),
             func.avg(ProviderRun.latency_ms).label("avg_lat"),
         )
@@ -355,3 +363,119 @@ async def _project_summaries(
 
     rows.sort(key=lambda x: x.provider_runs, reverse=True)
     return rows[:20]
+
+
+# ── Per-project cost breakdown ──────────────────────
+
+class CostLineItem(BaseModel):
+    provider: str
+    operation: str
+    model: str | None
+    runs: int
+    total_cost: float
+    avg_cost: float
+    total_input_tokens: int
+    total_output_tokens: int
+    avg_latency_ms: float | None
+
+
+class ProjectCostBreakdown(BaseModel):
+    project_id: str
+    total_cost: float
+    line_items: list[CostLineItem]
+    by_category: dict[str, float]
+    summary: dict[str, float | int]
+
+
+@router.get("/projects/{project_id}/costs", response_model=ProjectCostBreakdown)
+async def project_cost_breakdown(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Detailed cost breakdown for a single project."""
+    q = (
+        select(
+            ProviderRun.provider,
+            ProviderRun.operation,
+            ProviderRun.model,
+            func.count().label("runs"),
+            func.sum(func.coalesce(ProviderRun.cost_estimate, 0)).label("cost"),
+            func.avg(ProviderRun.latency_ms).label("avg_lat"),
+            func.sum(
+                func.coalesce(
+                    ProviderRun.token_usage["input_tokens"].as_integer(),
+                    ProviderRun.token_usage["input"].as_integer(),
+                    0,
+                )
+            ).label("inp_tok"),
+            func.sum(
+                func.coalesce(
+                    ProviderRun.token_usage["output_tokens"].as_integer(),
+                    ProviderRun.token_usage["output"].as_integer(),
+                    0,
+                )
+            ).label("out_tok"),
+        )
+        .where(ProviderRun.project_id == project_id)
+        .group_by(ProviderRun.provider, ProviderRun.operation, ProviderRun.model)
+        .order_by(func.sum(func.coalesce(ProviderRun.cost_estimate, 0)).desc())
+    )
+
+    result = await db.execute(q)
+    items: list[CostLineItem] = []
+    total_cost = 0.0
+    by_category: dict[str, float] = {}
+
+    for r in result.all():
+        cost = float(r.cost or 0)
+        runs = int(r.runs or 0)
+        items.append(CostLineItem(
+            provider=r.provider,
+            operation=r.operation,
+            model=r.model,
+            runs=runs,
+            total_cost=round(cost, 6),
+            avg_cost=round(cost / runs, 6) if runs else 0,
+            total_input_tokens=int(r.inp_tok or 0),
+            total_output_tokens=int(r.out_tok or 0),
+            avg_latency_ms=round(float(r.avg_lat), 1) if r.avg_lat else None,
+        ))
+        total_cost += cost
+
+        category = _operation_to_category(r.operation)
+        by_category[category] = by_category.get(category, 0) + cost
+
+    by_category = {k: round(v, 6) for k, v in by_category.items()}
+
+    total_runs_q = (
+        select(func.count())
+        .where(ProviderRun.project_id == project_id)
+    )
+    total_runs = (await db.execute(total_runs_q)).scalar() or 0
+
+    return ProjectCostBreakdown(
+        project_id=str(project_id),
+        total_cost=round(total_cost, 6),
+        line_items=items,
+        by_category=by_category,
+        summary={
+            "total_cost_usd": round(total_cost, 6),
+            "total_runs": total_runs,
+            "total_cost_krw": round(total_cost * 1450, 0),
+        },
+    )
+
+
+def _operation_to_category(op: str) -> str:
+    op_lower = op.lower()
+    if "plan" in op_lower or "script" in op_lower or "scene" in op_lower or "shot" in op_lower or "frame" in op_lower:
+        return "AI 플래닝"
+    if "image" in op_lower:
+        return "이미지 생성"
+    if "video" in op_lower:
+        return "비디오 생성"
+    if "tts" in op_lower or "voice" in op_lower:
+        return "음성 합성"
+    if "subtitle" in op_lower:
+        return "자막"
+    return "기타"

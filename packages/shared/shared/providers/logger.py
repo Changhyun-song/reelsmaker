@@ -9,6 +9,23 @@ from shared.providers.base import ProviderRequest, ProviderResponse
 
 logger = logging.getLogger("reelsmaker.providers.logger")
 
+# Per-token pricing (USD) — update when models change
+_TEXT_PRICING: dict[str, tuple[float, float]] = {
+    "claude-sonnet-4-20250514": (3.0 / 1_000_000, 15.0 / 1_000_000),
+    "claude-3-5-sonnet-20241022": (3.0 / 1_000_000, 15.0 / 1_000_000),
+    "claude-3-haiku-20240307": (0.25 / 1_000_000, 1.25 / 1_000_000),
+}
+_DEFAULT_TEXT_PRICING = (3.0 / 1_000_000, 15.0 / 1_000_000)
+
+
+def _estimate_text_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    inp_rate, out_rate = _DEFAULT_TEXT_PRICING
+    for key, (i, o) in _TEXT_PRICING.items():
+        if key in model:
+            inp_rate, out_rate = i, o
+            break
+    return round(input_tokens * inp_rate + output_tokens * out_rate, 6)
+
 
 async def log_provider_run(
     *,
@@ -42,6 +59,8 @@ async def log_provider_run(
     latency_ms = None
     model_used = request.model
 
+    cost_estimate: float | None = None
+
     if response:
         model_used = response.model
         latency_ms = response.latency_ms
@@ -51,10 +70,13 @@ async def log_provider_run(
             "parsed_keys": list(response.parsed.keys()) if isinstance(response.parsed, dict) else None,
         }
         token_usage = {
-            "input": response.input_tokens,
-            "output": response.output_tokens,
-            "total": response.input_tokens + response.output_tokens,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "total_tokens": response.input_tokens + response.output_tokens,
         }
+        cost_estimate = _estimate_text_cost(
+            model_used or "", response.input_tokens, response.output_tokens,
+        )
 
     async with async_session_factory() as session:
         run = ProviderRun(
@@ -67,6 +89,7 @@ async def log_provider_run(
             status=status,
             latency_ms=latency_ms,
             token_usage=token_usage,
+            cost_estimate=cost_estimate,
             error_message=error,
         )
         session.add(run)

@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from shared.database import async_session_factory
 from shared.models.asset import Asset
 from shared.models.frame_spec import FrameSpec
+from shared.models.prompt_history import PromptHistory
 from shared.models.provider_run import ProviderRun
 from shared.prompt_compiler import compile_full
 from shared.prompt_compiler.context_builder import build_compiler_context
@@ -204,6 +205,44 @@ async def handle_image_generate(
             frame.status = "generated"
             frame.visual_prompt = compiled.detailed_prompt
             frame.negative_prompt = compiled.negative_prompt
+
+        # Save prompt history
+        prompt_source = "story_prompt" if has_story_prompt else "compiler"
+        # Mark all previous versions as not current
+        from sqlalchemy import update
+        await session.execute(
+            update(PromptHistory)
+            .where(PromptHistory.frame_id == fid)
+            .values(is_current=False)
+        )
+        # Determine next prompt version
+        max_ver_result = await session.execute(
+            select(func.coalesce(func.max(PromptHistory.version), 0))
+            .where(PromptHistory.frame_id == fid)
+        )
+        next_prompt_ver = (max_ver_result.scalar() or 0) + 1
+
+        first_asset_id = uuid.UUID(asset_ids[0]) if asset_ids else None
+        history_entry = PromptHistory(
+            project_id=pid,
+            frame_id=fid,
+            version=next_prompt_ver,
+            prompt_text=compiled.detailed_prompt,
+            negative_prompt=compiled.negative_prompt,
+            prompt_source=prompt_source,
+            quality_mode=compiled.provider_options.get("quality_mode", "balanced"),
+            generation_batch=batch_id,
+            asset_id=first_asset_id,
+            provider=response.provider,
+            model=response.model,
+            is_current=True,
+            metadata_={
+                "num_variants": len(response.images),
+                "all_asset_ids": asset_ids,
+                "continuity_notes": compiled.continuity_notes[:300] if compiled.continuity_notes else None,
+            },
+        )
+        session.add(history_entry)
 
         await session.commit()
 

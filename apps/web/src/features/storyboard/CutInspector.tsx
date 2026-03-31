@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { CutItem } from "./CutListPanel";
+import PromptHistoryPanel from "@/features/prompt-lab/PromptHistoryPanel";
 
 /* ── Types ──────────────────────────────────────────── */
 
@@ -148,6 +149,7 @@ export default function CutInspector({
   const [moodVal, setMoodVal] = useState("");
   const [dirty, setDirty] = useState<DirtyFields>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const prevFrameId = useRef<string | null>(null);
 
@@ -283,8 +285,32 @@ export default function CutInspector({
 
         {/* Divider */}
         <div className="border-t border-neutral-800 pt-3">
-          <p className="text-[9px] font-bold text-neutral-500 uppercase mb-2">이미지 프롬프트</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[9px] font-bold text-neutral-500 uppercase">이미지 프롬프트</p>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`rounded-md px-2 py-0.5 text-[9px] font-medium border transition ${
+                showHistory
+                  ? "bg-violet-600/20 border-violet-700/40 text-violet-400"
+                  : "bg-neutral-800 border-neutral-700/50 text-neutral-500 hover:text-neutral-300"
+              }`}
+            >
+              {showHistory ? "히스토리 닫기" : "히스토리"}
+            </button>
+          </div>
         </div>
+
+        {/* Prompt history panel */}
+        {showHistory && (
+          <PromptHistoryPanel
+            projectId={projectId}
+            frameId={frameDetail.id}
+            onRestore={() => {
+              prevFrameId.current = null;
+              setShowHistory(false);
+            }}
+          />
+        )}
 
         {/* Visual prompt */}
         <FieldEditor

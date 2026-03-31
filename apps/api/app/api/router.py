@@ -26,6 +26,7 @@ from app.api.qa import router as qa_router
 from app.api.exports import router as exports_router
 from app.api.evaluations import router as evaluations_router
 from app.api.continuity import router as continuity_router
+from app.api.prompt_history import router as prompt_history_router
 from app.api.ops import router as ops_router
 from app.api.billing import router as billing_router
 
@@ -53,6 +54,7 @@ api_router.include_router(qa_router, prefix="/projects", tags=["qa"])
 api_router.include_router(exports_router, prefix="/projects", tags=["export"])
 api_router.include_router(evaluations_router, prefix="/projects", tags=["evaluations"])
 api_router.include_router(continuity_router, prefix="/projects", tags=["continuity"])
+api_router.include_router(prompt_history_router, prefix="/projects", tags=["prompt-history"])
 
 
 # ── Continuity Bible CRUD (stored in project.settings.bible) ──

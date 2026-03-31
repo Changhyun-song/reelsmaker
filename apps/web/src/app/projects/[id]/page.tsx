@@ -38,6 +38,7 @@ import VoicePicker from "@/features/voice/VoicePicker";
 import TimelineEditor from "@/features/timeline/TimelineEditor";
 import RenderPanel from "@/features/render/RenderPanel";
 import CostDashboard from "@/features/studio/CostDashboard";
+import PipelineInspector from "./pipeline-inspector";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 
@@ -3150,6 +3151,9 @@ export default function ProjectDetailPage({
               hasApiKey={hasApiKey}
             />
           )}
+
+          {/* Pipeline Inspector */}
+          <PipelineInspector projectId={projectId} />
 
           {/* Cost summary */}
           {(hasImages || hasVideos || hasVoices) && (

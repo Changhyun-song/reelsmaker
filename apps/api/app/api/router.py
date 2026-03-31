@@ -153,6 +153,225 @@ async def project_progress(
     }
 
 
+@api_router.get("/projects/{project_id}/pipeline-inspect", tags=["projects"])
+async def pipeline_inspect(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    """Full pipeline diagnostic snapshot for a project."""
+    from shared.models import (
+        ScriptVersion, Scene, Shot, FrameSpec, Asset,
+        VoiceTrack, SubtitleTrack, Timeline, RenderJob, Job,
+    )
+    from shared.models.provider_run import ProviderRun
+    from sqlalchemy import func, select, desc
+
+    pid = project_id
+    stages: dict = {}
+
+    # ── Script ──
+    sv_row = (await db.execute(
+        select(
+            ScriptVersion.id, ScriptVersion.status, ScriptVersion.version,
+            ScriptVersion.created_at, ScriptVersion.updated_at,
+        )
+        .where(ScriptVersion.project_id == pid)
+        .order_by(ScriptVersion.version.desc())
+        .limit(1)
+    )).first()
+    script_id = sv_row[0] if sv_row else None
+    stages["script"] = {
+        "exists": sv_row is not None,
+        "status": sv_row[1] if sv_row else None,
+        "version": sv_row[2] if sv_row else None,
+        "updated_at": str(sv_row[4] or sv_row[3]) if sv_row else None,
+    }
+
+    # ── Scene / Shot / Frame counts + structural warnings ──
+    scene_count = shot_count = frame_count = 0
+    scene_ids: list = []
+    shot_ids: list = []
+    frames_with_prompt = 0
+    frames_with_story_prompt = 0
+
+    if script_id:
+        scene_count = (await db.execute(
+            select(func.count()).where(Scene.script_version_id == script_id)
+        )).scalar() or 0
+        if scene_count > 0:
+            scene_ids = [r[0] for r in (await db.execute(
+                select(Scene.id).where(Scene.script_version_id == script_id)
+            )).all()]
+            shot_count = (await db.execute(
+                select(func.count()).where(Shot.scene_id.in_(scene_ids))
+            )).scalar() or 0
+            if shot_count > 0:
+                shot_ids = [r[0] for r in (await db.execute(
+                    select(Shot.id).where(Shot.scene_id.in_(scene_ids))
+                )).all()]
+                frame_count = (await db.execute(
+                    select(func.count()).where(FrameSpec.shot_id.in_(shot_ids))
+                )).scalar() or 0
+                frames_with_prompt = (await db.execute(
+                    select(func.count()).where(
+                        FrameSpec.shot_id.in_(shot_ids),
+                        FrameSpec.visual_prompt.isnot(None),
+                        FrameSpec.visual_prompt != "",
+                    )
+                )).scalar() or 0
+
+    warnings: list[str] = []
+    if scene_count > 0 and shot_count == 0:
+        warnings.append("씬은 있지만 샷이 0개 — 샷 구성이 실행되지 않았습니다")
+    if shot_count > 0 and frame_count == 0:
+        warnings.append("샷은 있지만 프레임이 0개 — 프레임 구성이 실행되지 않았습니다")
+    if frame_count > 0 and frames_with_prompt == 0:
+        warnings.append("프레임은 있지만 프롬프트가 0개 — 스토리 프롬프트 또는 이미지 생성을 실행하세요")
+
+    stages["scene"] = {"count": scene_count, "updated_at": None}
+    stages["shot"] = {"count": shot_count, "updated_at": None}
+    stages["frame"] = {
+        "count": frame_count,
+        "with_prompt": frames_with_prompt,
+        "story_prompt_ratio": f"{frames_with_prompt}/{frame_count}" if frame_count else "0/0",
+        "updated_at": None,
+    }
+
+    # ── Image / Video / TTS / Subtitle / Timeline / Render ──
+    image_count = (await db.execute(
+        select(func.count()).where(Asset.project_id == pid, Asset.asset_type == "image")
+    )).scalar() or 0
+    image_ready = (await db.execute(
+        select(func.count()).where(Asset.project_id == pid, Asset.asset_type == "image", Asset.status == "ready")
+    )).scalar() or 0
+
+    video_count = (await db.execute(
+        select(func.count()).where(Asset.project_id == pid, Asset.asset_type == "video")
+    )).scalar() or 0
+    video_ready = (await db.execute(
+        select(func.count()).where(Asset.project_id == pid, Asset.asset_type == "video", Asset.status == "ready")
+    )).scalar() or 0
+
+    voice_count = (await db.execute(
+        select(func.count()).where(VoiceTrack.project_id == pid)
+    )).scalar() or 0
+    subtitle_count = (await db.execute(
+        select(func.count()).where(SubtitleTrack.project_id == pid)
+    )).scalar() or 0
+    timeline_count = (await db.execute(
+        select(func.count()).where(Timeline.project_id == pid)
+    )).scalar() or 0
+    render_count = (await db.execute(
+        select(func.count()).where(RenderJob.project_id == pid)
+    )).scalar() or 0
+    render_completed = (await db.execute(
+        select(func.count()).where(RenderJob.project_id == pid, RenderJob.status == "completed")
+    )).scalar() or 0
+
+    stages["image"] = {"total": image_count, "ready": image_ready}
+    stages["video"] = {"total": video_count, "ready": video_ready}
+    stages["tts"] = {"count": voice_count}
+    stages["subtitle"] = {"count": subtitle_count}
+    stages["timeline"] = {"count": timeline_count}
+    stages["render"] = {"total": render_count, "completed": render_completed}
+
+    # ── Recent jobs (last 20, all statuses) ──
+    recent_jobs_rows = (await db.execute(
+        select(
+            Job.id, Job.job_type, Job.status, Job.progress,
+            Job.error_message, Job.created_at, Job.completed_at,
+            Job.result, Job.retry_count, Job.max_retries,
+        )
+        .where(Job.project_id == pid)
+        .order_by(desc(Job.created_at))
+        .limit(20)
+    )).all()
+
+    recent_jobs = []
+    latest_by_type: dict[str, dict] = {}
+    for j in recent_jobs_rows:
+        jd = {
+            "id": str(j[0]), "job_type": j[1], "status": j[2],
+            "progress": j[3], "error_message": j[4],
+            "created_at": str(j[5]) if j[5] else None,
+            "completed_at": str(j[6]) if j[6] else None,
+            "result_preview": _truncate_dict(j[7], 300) if j[7] else None,
+            "retry_count": j[8], "max_retries": j[9],
+        }
+        recent_jobs.append(jd)
+        if j[1] not in latest_by_type:
+            latest_by_type[j[1]] = jd
+
+    # ── Provider runs (recent 10) ──
+    provider_rows = (await db.execute(
+        select(
+            ProviderRun.provider, ProviderRun.operation, ProviderRun.model,
+            ProviderRun.status, ProviderRun.latency_ms, ProviderRun.error_message,
+            ProviderRun.created_at, ProviderRun.cost_estimate,
+        )
+        .where(ProviderRun.project_id == pid)
+        .order_by(desc(ProviderRun.created_at))
+        .limit(10)
+    )).all()
+
+    provider_runs = [
+        {
+            "provider": r[0], "operation": r[1], "model": r[2],
+            "status": r[3], "latency_ms": r[4], "error_message": r[5],
+            "created_at": str(r[6]) if r[6] else None,
+            "cost_estimate": r[7],
+        }
+        for r in provider_rows
+    ]
+
+    # ── Prompt samples (first 3 frames that have visual_prompt) ──
+    prompt_samples = []
+    if frame_count > 0 and shot_ids:
+        sample_frames = (await db.execute(
+            select(FrameSpec.id, FrameSpec.frame_role, FrameSpec.visual_prompt, FrameSpec.negative_prompt)
+            .where(FrameSpec.shot_id.in_(shot_ids), FrameSpec.visual_prompt.isnot(None))
+            .order_by(FrameSpec.order_index)
+            .limit(3)
+        )).all()
+        for sf in sample_frames:
+            prompt_samples.append({
+                "frame_id": str(sf[0]),
+                "frame_role": sf[1],
+                "visual_prompt_preview": (sf[2] or "")[:300],
+                "has_negative": bool(sf[3]),
+            })
+
+    # ── Health / providers info ──
+    providers = {
+        "image": settings.image_provider,
+        "video": settings.video_provider,
+        "tts": settings.tts_provider,
+        "text": "claude" if settings.anthropic_api_key else "none",
+    }
+
+    return {
+        "project_id": pid,
+        "stages": stages,
+        "warnings": warnings,
+        "recent_jobs": recent_jobs,
+        "latest_by_type": latest_by_type,
+        "provider_runs": provider_runs,
+        "prompt_samples": prompt_samples,
+        "providers": providers,
+    }
+
+
+def _truncate_dict(d: dict | None, max_chars: int = 300) -> dict | str:
+    if not d:
+        return {}
+    import json
+    s = json.dumps(d, ensure_ascii=False, default=str)
+    if len(s) > max_chars:
+        return s[:max_chars] + "..."
+    return d
+
+
 @api_router.get("/health", tags=["system"])
 async def health_check(db: AsyncSession = Depends(get_db)):
     checks: dict[str, str] = {"api": "ok"}
